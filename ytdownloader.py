@@ -1,10 +1,10 @@
 '''
-This Python3program uses youtube-dl to download audio tracks to the local disk and displays
+This Python3 program uses youtube-dl to download audio tracks to the local disk and displays
 the downloaded files in a DnD aware list control for easy transfer to other tools such
 as Audacity. In order to conserve disk space files are deleted several seconds after they
 are dragged, e.g. it assumes that the target tool creates its own copy of the file. Files
 are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been installed and
-include in the user's $PATH.
+included in the user's $PATH.
 '''
 import glob, subprocess, threading, time, os
 from os.path import expanduser
@@ -109,8 +109,8 @@ class FilePickerListbox(object):
         print("drag end:" + file_name)
         # Don't delte LID files since they are reused.
         if file_name.find("/LID_") < 0:
-            self.tree.delete_file_after_delay(file_name)
-            threading.Thread(target=delete_file, args=([file_name])).start()
+            self.tree.delete(file_name)
+            threading.Thread(target=delete_file_after_delay, args=([file_name])).start()
             self.tree.dragging = False
 
     def drag_data_get(self, event):
