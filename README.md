@@ -1,20 +1,31 @@
 # Youtube Download Tool
 
 This Python3 program uses youtube-dl to download audio tracks to the local disk and displays
-the downloaded files in a DnD aware list control for easy transfer to other tools such
+the downloaded files in a drag-and-drop enabled list control for easy transfer to other tools such
 as Audacity. In order to conserve disk space files are deleted several seconds after they
 are dragged, e.g. it assumes that the target tool creates its own copy of the file. Files
-are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been installed and
+are downloaded into ~/Music/ytdl. This program assumes that youtube-dl has been installed and
 included in the user's $PATH.
 
 ## Setup
 
 This tool assumes that youtube-dl has been installed and included in the user's $PATH variable.
+The steps for the entire app tool set on a Mac from a terminal are are follows:
 
-The required Python dependencies can be installed via the following:
-   - pip install -r requirements.txt
+   - ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)" - install Homebrew, takes approximately 10 minutes
+   - brew install wget
+   - sudo wget https://yt-dl.org/downloads/latest/youtube-dl -O /usr/local/bin/youtube-dl
+   - test youtube-dl if it cannot be executed do the following:
+       - sudo chown <USER_NAME> /usr/local/bin/youtube-dl
+       - chmod u+x /usr/local/bin/youtube-dl
 
-Note: You may want to create a virtual environment before installing the requirements.
+   - cd <SOURCE_DIR>
+   - git clone git@github.com:eric-gilbertson/ytdownloader.git
+   - cd ytdownloader
+   - python3 -m pip install --user -r requirements.txt
+
+
+Note: the ytdownloader app will not run on the lastest Apple Silicon Macbook because the required tkdnd2 Python library is not available for this architecture.
 
 
 ## Usage
