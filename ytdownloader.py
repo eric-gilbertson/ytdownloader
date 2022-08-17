@@ -20,13 +20,13 @@ YTDL_PATH = None
 
 def execute_command(cmd):
     try:
-        print("Execute: +{}+\n".format(cmd))
+        #print("Execute: +{}+\n".format(cmd))
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         (output, err) = p.communicate()
         p_status = p.wait()
+        root.bell()
         if p_status != 0:
             msg = "Returned +{}+, +{}+".format(output, str(err))
-            print(msg)
             tk.messagebox.showwarning(title='Error', message=msg)
 
         return p_status == 0
@@ -36,7 +36,7 @@ def execute_command(cmd):
 
 def delete_file_after_delay(file_name):
     time.sleep(10)  # audacity needs time to process the file
-    print("delete: " + file_name)
+    #print("delete: " + file_name)
     os.remove(file_name)
 
 class ControlPanel(object):
@@ -55,7 +55,7 @@ class ControlPanel(object):
         top_frame.pack(fill=tk.X)
 
     def _on_url_enter(self, widget):
-        print("enter: " + self.url.get())
+        #print("enter: " + self.url.get())
         self._fetch_url()
 
     def set_list_widget(self, list_widget):
@@ -68,7 +68,7 @@ class ControlPanel(object):
         if not YTDL_PATH:
             tk.messagebox.showwarning('Error', "youtube-dl was not found. please check your installation.")
         else:
-            print("load url: " + self.urlEntry.get())
+            #print("load url: " + self.urlEntry.get())
             out_file = '"{}/%(artist)s_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR)
             cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
             if execute_command(cmd):
@@ -94,19 +94,20 @@ class FilePickerListbox(object):
         data = ()
         self.item_name = self.tree.selection()
         if self.item_name:
-            print("doing drag: {}".format(self.item_name))
+            #print("doing drag: {}".format(self.item_name))
             self.tree.dragging = True
             return ((COPY), (DND_FILES), (self.item_name))
         else:
             return 'break'
 
     def drag_data_get(self, event):
-        print("drag data get")
+        pass
+        #print("drag data get")
 
     def drag_end(self, event):
         # reset the "dragging" flag to enable drops again
         file_name = self.item_name[0]
-        print("drag end:" + file_name)
+        #print("drag end:" + file_name)
         # Don't delte LID files since they are reused.
         if file_name.find("/LID_") < 0:
             self.tree.delete(file_name)
@@ -121,7 +122,7 @@ class FilePickerListbox(object):
         container.pack(fill='both', expand=True)
 
         # create a treeview with dual scrollbars
-        self.tree = ttk.Treeview(columns=self.table_header, show="headings")
+        self.tree = ttk.Treeview(columns=self.table_header, height=500, show="headings")
         vsb = ttk.Scrollbar(orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -144,10 +145,17 @@ class FilePickerListbox(object):
         current_files = self.tree.get_children()
         idx = len(current_files)
         for file in files:
-            if not file.endswith('.json') and not file in current_files:
-                name = file[self.prefix_len : len(file)]
-                self.files.append(name)
-                self.tree.insert('', 'end', iid=file, text=name, values=([name]))
+            if file.endswith('.json') or file in current_files:
+                continue
+
+            if file.find('/NA_') > 0:
+                new_file = file.replace('/NA_', '/')
+                os.rename(file, new_file)
+                file = new_file
+
+            name = file[self.prefix_len: len(file)]
+            self.files.append(name)
+            self.tree.insert('', 'end', iid=file, text=name, values=([name]))
 
     def _build_tree(self):
         for col in self.table_header:
@@ -157,12 +165,13 @@ class FilePickerListbox(object):
 
         self.populate_list()
 
-
+def resize(event):
+    print("height: ", event.height, "width: ", event.width)
 
 if __name__ == '__main__':
     root = TkinterDnD.Tk()
     root.title("Youtube Download Tool")
-    root.geometry("560x280")
+    root.geometry("560x480")
     control_panel = ControlPanel(root)
 
     YTDL_PATH = spawn.find_executable('youtube-dl')
@@ -171,9 +180,10 @@ if __name__ == '__main__':
     if not os.path.exists(DOWNLOAD_DIR):
         os.makedirs(DOWNLOAD_DIR)
 
-    list_frame = tk.Frame(master=root)
+    list_frame = tk.Frame(master=root, height=300)
     list_frame.pack(fill=tk.X)
     listbox = FilePickerListbox(list_frame)
     control_panel.set_list_widget(listbox)
+    #root.bind("<Configure>", resize)
     root.mainloop()
 
