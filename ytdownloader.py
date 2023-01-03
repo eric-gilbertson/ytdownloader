@@ -9,14 +9,56 @@ included in the user's $PATH.
 import glob, subprocess, threading, time, os
 from os.path import expanduser
 from distutils import spawn
+from pathlib import Path
 import tkinter as tk
 import tkinter.messagebox
 import tkinter.font as tkFont
 import tkinter.ttk as ttk
 from tkinterdnd2 import *
+from audio_trimmer import trim_audio
 
 DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
 YTDL_PATH = None
+
+
+class CommandThread(threading.Thread):
+    def __init__(self, cmd):
+        super(CommandThread, self).__init__()
+        self.cmd = cmd
+        self.process = None
+        self.stdout = None
+        self.stderr = None
+
+    def run(self):
+        self.process = subprocess.Popen(self.cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        (self.stdout, self.stderr) = self.process.communicate()
+        pass
+
+def schedule_check(command_thread):
+    root.after(2000, check_if_done, command_thread)
+
+def check_if_done(command_thread):
+    if command_thread.process.returncode == None:
+        schedule_check(command_thread)
+    else:
+        root.bell()
+        if command_thread.process.returncode == 0:
+            res = str(command_thread.stdout)
+            idx1 = res.rfind("Destination: ") + 13
+            idx2 = res.find("\\", idx1)
+            if idx2 > idx1:
+                filepath =  res[idx1:idx2]
+                Path(filepath).touch()
+                trim_audio(filepath)
+
+            listbox.populate_list()
+            control_panel.url.delete(0, "end")
+            control_panel.url.config(cursor="")
+            control_panel.url.update()
+        else:
+            msg = "Returned +{}+".format(str(command_thread.stderr))
+            tk.messagebox.showwarning(title='Error', message=msg)
+
 
 def execute_command(cmd):
     try:
@@ -35,9 +77,9 @@ def execute_command(cmd):
         return False
 
 def delete_file_after_delay(file_name):
-    time.sleep(10)  # audacity needs time to process the file
-    #print("delete: " + file_name)
-    os.remove(file_name)
+    if os.path.exists(file_name):
+        time.sleep(10)  # audacity needs time to process the file
+        os.remove(file_name)
 
 class ControlPanel(object):
     def __init__(self, frame):
@@ -71,9 +113,11 @@ class ControlPanel(object):
             #print("load url: " + self.urlEntry.get())
             out_file = '"{}/%(artist)s_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR)
             cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
-            if execute_command(cmd):
-                listbox.populate_list()
-                self.url.delete(0, "end")
+            download_thread = CommandThread(cmd)
+            control_panel.url.config(cursor="wait")
+            control_panel.url.update()
+            download_thread.start()
+            schedule_check(download_thread)
 
 class FilePickerListbox(object):
 
@@ -154,8 +198,11 @@ class FilePickerListbox(object):
                 file = new_file
 
             name = file[self.prefix_len: len(file)]
-            self.files.append(name)
-            self.tree.insert('', 'end', iid=file, text=name, values=([name]))
+            if not name in self.files:
+                self.files.append(name)
+                self.tree.insert('', 'end', iid=file, text=name, values=([name]))
+            else:
+                print("File already exists: " + name)
 
     def _build_tree(self):
         for col in self.table_header:
