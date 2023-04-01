@@ -53,7 +53,7 @@ def get_gap_info(filePath):
     return start_gap, end_gap, duration
 
 def trim_audio(srcFile):
-    GAP_SECONDS = 2
+    GAP_SECONDS = 1
     start_gap, end_gap, duration = get_gap_info(srcFile)
     start_trim = max(start_gap - GAP_SECONDS, 0)
     end_trim = max(end_gap - GAP_SECONDS, 0)
@@ -67,9 +67,6 @@ def trim_audio(srcFile):
             return None
         
         saveFile = os.path.dirname(srcFile) + srcpath.stem + ".trim" + srcpath.suffix
-        if not os.path.exists(saveFile): 
-            os.rename(srcFile, saveFile) # save only the true ref file & don't overwrite
-
         os.rename(tmpFile, srcFile)
     else:
         print("no change: {}, {:0.2f}, {:0.2f}".format(srcFile, start_trim, end_trim))

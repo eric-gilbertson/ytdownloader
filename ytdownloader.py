@@ -21,6 +21,11 @@ DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
 YTDL_PATH = None
 
 
+# TODO
+# escape quotes in downloaded filename when invoking ffmpeg trim.
+# set input box red/green upon completion
+# remove '(Official Video)' and '(Lyric Video)' and single quotes from filename.
+
 class CommandThread(threading.Thread):
     def __init__(self, cmd):
         super(CommandThread, self).__init__()
@@ -37,27 +42,66 @@ class CommandThread(threading.Thread):
 def schedule_check(command_thread):
     root.after(2000, check_if_done, command_thread)
 
+def clean_filepath(filepath):
+    new_file = filepath
+    if new_file.find('\'') >= 0:
+        new_file = new_file.replace('\'', '')
+
+    idx1 = new_file.find(' (')
+    if idx1 > 0:
+        idx2 = new_file.find(')', idx1)
+        if idx2 > idx1:
+            new_file = new_file[0:idx1] + new_file[idx2 + 1:]
+
+    if new_file.find('/NA_') >= 0:
+        new_file = new_file.replace('/NA_', '/')
+
+    # just in case we lost the suffix in the transform.
+    if not new_file.endswith('.wav'):
+        new_file += '.wav'
+
+    if new_file != filepath:
+        print("Rename: {}, {}".format(filepath, new_file))
+        os.rename(filepath, new_file)
+
+    Path(new_file).touch()
+    return new_file
+
+
 def check_if_done(command_thread):
     if command_thread.process.returncode == None:
         schedule_check(command_thread)
     else:
         root.bell()
-        if command_thread.process.returncode == 0:
-            res = str(command_thread.stdout)
+        errmsg = str(command_thread.stderr) # returns '\\\' even when there is no error.
+        length = len(errmsg)
+
+        # ignore 403 errors because they are usually false.
+        is403 = errmsg.find(' 403') > 0
+        if is403:
+            tk.messagebox.showwarning(title='403 Error', message=errmsg)
+
+        if (command_thread.process.returncode == 0 or is403) and len(errmsg) < 4:
+            res = str(command_thread.stdout, 'utf-8')
             idx1 = res.rfind("Destination: ") + 13
-            idx2 = res.find("\\", idx1)
-            if idx2 > idx1:
-                filepath =  res[idx1:idx2]
-                Path(filepath).touch()
+            idx2 = res.find(".wav", idx1)
+            if idx1 > 13 and idx2 > idx1:
+                filepath =  res[idx1:idx2+4]
+                filepath = clean_filepath(filepath)
                 trim_audio(filepath)
 
-            listbox.populate_list()
-            control_panel.url.delete(0, "end")
-            control_panel.url.config(cursor="")
-            control_panel.url.update()
-        else:
-            msg = "Returned +{}+".format(str(command_thread.stderr))
-            tk.messagebox.showwarning(title='Error', message=msg)
+                listbox.populate_list()
+                control_panel.url.delete(0, "end")
+                control_panel.url.config(cursor="")
+                #control_panel.url.config({"background": "Green"})
+                control_panel.url.update()
+            else:
+                errmsg = res
+
+        if len(errmsg) > 4:
+            tk.messagebox.showwarning(title='Error', message=errmsg)
+            #control_panel.url.config({"background": "Red"})
+            #control_panel.url.update()
 
 
 def execute_command(cmd):
@@ -107,12 +151,16 @@ class ControlPanel(object):
         self.list_widget.reload_list();
 
     def _fetch_url(self):
+        #control_panel.url.config({"background": "White"})
+        #control_panel.url.update()
+
         if not YTDL_PATH:
             tk.messagebox.showwarning('Error', "youtube-dl was not found. please check your installation.")
         else:
-            #print("load url: " + self.urlEntry.get())
+            print("load url: " + self.urlEntry.get())
             out_file = '"{}/%(artist)s_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR)
             cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
+            print("cmd: " + cmd)
             download_thread = CommandThread(cmd)
             control_panel.url.config(cursor="wait")
             control_panel.url.update()
@@ -191,11 +239,6 @@ class FilePickerListbox(object):
         for file in files:
             if file.endswith('.json') or file in current_files:
                 continue
-
-            if file.find('/NA_') > 0:
-                new_file = file.replace('/NA_', '/')
-                os.rename(file, new_file)
-                file = new_file
 
             name = file[self.prefix_len: len(file)]
             if not name in self.files:
