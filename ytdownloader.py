@@ -6,7 +6,7 @@ are dragged, e.g. it assumes that the target tool creates its own copy of the fi
 are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been installed and
 included in the user's $PATH.
 '''
-import glob, subprocess, threading, time, os
+import glob, subprocess, threading, time, os, datetime
 from os.path import expanduser
 from distutils import spawn
 from pathlib import Path
@@ -19,6 +19,12 @@ from audio_trimmer import trim_audio
 
 DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
 YTDL_PATH = None
+
+
+def logit(msg):
+    timestr = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S: ")
+    with open('/tmp/ytdl_log.txt', 'a') as logfile:
+        logfile.write(timestr + msg + '\n')
 
 
 # TODO
@@ -61,7 +67,7 @@ def clean_filepath(filepath):
         new_file += '.wav'
 
     if new_file != filepath:
-        print("Rename: {}, {}".format(filepath, new_file))
+        logit("Rename: {}, {}".format(filepath, new_file))
         os.rename(filepath, new_file)
 
     Path(new_file).touch()
@@ -106,7 +112,7 @@ def check_if_done(command_thread):
 
 def execute_command(cmd):
     try:
-        #print("Execute: +{}+\n".format(cmd))
+        #logit("Execute: +{}+\n".format(cmd))
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         (output, err) = p.communicate()
         p_status = p.wait()
@@ -117,13 +123,13 @@ def execute_command(cmd):
 
         return p_status == 0
     except Exception as ioe:
-        print('Exception executing command: {}, {}'.format(cmd, ioe))
+        logit('Exception executing command: {}, {}'.format(cmd, ioe))
         return False
 
 def delete_file_after_delay(file_name):
     if os.path.exists(file_name):
         time.sleep(10)  # audacity needs time to process the file
-        os.remove(file_name)
+        #os.remove(file_name)
 
 class ControlPanel(object):
     def __init__(self, frame):
@@ -141,7 +147,7 @@ class ControlPanel(object):
         top_frame.pack(fill=tk.X)
 
     def _on_url_enter(self, widget):
-        #print("enter: " + self.url.get())
+        #logit("enter: " + self.url.get())
         self._fetch_url()
 
     def set_list_widget(self, list_widget):
@@ -157,10 +163,10 @@ class ControlPanel(object):
         if not YTDL_PATH:
             tk.messagebox.showwarning('Error', "youtube-dl was not found. please check your installation.")
         else:
-            print("load url: " + self.urlEntry.get())
+            logit("load url: " + self.urlEntry.get())
             out_file = '"{}/%(artist)s_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR)
             cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
-            print("cmd: " + cmd)
+            logit("cmd: " + cmd)
             download_thread = CommandThread(cmd)
             control_panel.url.config(cursor="wait")
             control_panel.url.update()
@@ -173,7 +179,6 @@ class FilePickerListbox(object):
         self.table_header = ['File']
         self.tree = None
         self.item_name = None
-        self.files = []
         self._setup_widgets(frame)
         self._build_tree()
 
@@ -186,7 +191,7 @@ class FilePickerListbox(object):
         data = ()
         self.item_name = self.tree.selection()
         if self.item_name:
-            #print("doing drag: {}".format(self.item_name))
+            #logit("doing drag: {}".format(self.item_name))
             self.tree.dragging = True
             return ((COPY), (DND_FILES), (self.item_name))
         else:
@@ -194,12 +199,12 @@ class FilePickerListbox(object):
 
     def drag_data_get(self, event):
         pass
-        #print("drag data get")
+        #logit("drag data get")
 
     def drag_end(self, event):
         # reset the "dragging" flag to enable drops again
         file_name = self.item_name[0]
-        #print("drag end:" + file_name)
+        #logit("drag end:" + file_name)
         # Don't delte LID files since they are reused.
         if file_name.find("/LID_") < 0:
             self.tree.delete(file_name)
@@ -207,7 +212,7 @@ class FilePickerListbox(object):
             self.tree.dragging = False
 
     def drag_data_get(self, event):
-        print("drag data get")
+        logit("drag data get")
 
     def _setup_widgets(self, frame):
         container = ttk.Frame(frame)
@@ -230,22 +235,42 @@ class FilePickerListbox(object):
 
     def populate_list(self):
         path = DOWNLOAD_DIR + "/*"
-        self.prefix_len = len(path) - 1
-        self.prefix = path[0:self.prefix_len]
+        prefix_len = len(path) - 1
+        prefix = path[0:prefix_len]
         files = glob.glob(path)
 
-        current_files = self.tree.get_children()
-        idx = len(current_files)
+        mergeFiles = []
         for file in files:
-            if file.endswith('.json') or file in current_files:
+            name = file[prefix_len: len(file)]
+            mergeFiles.append([name, file])
+
+        path = expanduser("~") + "/Downloads/"
+        prefix_len = len(path)
+        path = path + "*- * - *.mp3"
+        prefix = path[0:prefix_len]
+        files = glob.glob(path)
+
+        for file in files:
+            name = file[prefix_len: len(file)]
+            mergeFiles.append([name, file])
+
+        mergeFiles.sort(key=lambda x: x[0])
+
+        current_files = self.tree.get_children()
+        loadedFiles = []
+        idx = len(current_files)
+        for fileAr in mergeFiles:
+            if fileAr[1].endswith('.json') or fileAr[1] in current_files:
                 continue
 
-            name = file[self.prefix_len: len(file)]
-            if not name in self.files:
-                self.files.append(name)
-                self.tree.insert('', 'end', iid=file, text=name, values=([name]))
+            name = fileAr[0]
+            if not name in loadedFiles:
+                loadedFiles.append(name)
+                #print("add: " + name)
+                self.tree.insert('', 'end', iid=fileAr[1], text=name, values=([name]))
             else:
-                print("File already exists: " + name)
+                pass #logit("File already exists: " + name)
+
 
     def _build_tree(self):
         for col in self.table_header:
@@ -256,7 +281,7 @@ class FilePickerListbox(object):
         self.populate_list()
 
 def resize(event):
-    print("height: ", event.height, "width: ", event.width)
+    logit("height: ", event.height, "width: ", event.width)
 
 if __name__ == '__main__':
     root = TkinterDnD.Tk()
@@ -265,7 +290,9 @@ if __name__ == '__main__':
     control_panel = ControlPanel(root)
 
     YTDL_PATH = spawn.find_executable('youtube-dl')
-    print("ytdl path: " + YTDL_PATH)
+    YTDL_PATH = "/Users/Barbara/src/youtube-dl/youtube-dl"
+
+    logit("ytdl path: " + YTDL_PATH)
 
     if not os.path.exists(DOWNLOAD_DIR):
         os.makedirs(DOWNLOAD_DIR)
