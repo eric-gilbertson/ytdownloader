@@ -6,7 +6,7 @@ are dragged, e.g. it assumes that the target tool creates its own copy of the fi
 are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been installed and
 included in the user's $PATH.
 '''
-import glob, subprocess, threading, time, os, datetime
+import glob, subprocess, threading, time, os, datetime, re
 from os.path import expanduser
 from distutils import spawn
 from pathlib import Path
@@ -86,26 +86,12 @@ class CommandThread(threading.Thread):
 def schedule_check(command_thread):
     root.after(2000, check_if_done, command_thread)
 
+
 def clean_filepath(filepath):
     new_file = filepath
 
-    # remove parentheticals first
-    idx1 = new_file.find('(')
-    if idx1 > 0:
-        idx2 = new_file.find(')', idx1)
-        if idx2 > idx1:
-            new_file = new_file[0:idx1] + new_file[idx2 + 1:]
-
-    idx1 = new_file.find('[')
-    if idx1 > 0:
-        idx2 = new_file.find(']', idx1)
-        if idx2 > idx1:
-            new_file = new_file[0:idx1] + new_file[idx2 + 1:]
-
-
-    if new_file.find('\'') >= 0:
-        new_file = new_file.replace('\'', '')
-
+    # remove parenthetical and bracketed text
+    new_file = re.sub("[\(\[].*?[\)\]]", "", new_file)
 
     if new_file.find('｜') >= 0:
         new_file = new_file.replace('｜', '\t')
@@ -116,14 +102,16 @@ def clean_filepath(filepath):
     if new_file.find('"') >= 0:  # regular double quote
         new_file = new_file.replace('"', '')
 
-    if new_file.find('-') >= 0 or new_file.find('–') >= 0:
+    if new_file.find('-') >= 0:
         new_file = new_file.replace('-', '\t')
 
+    if new_file.find('–') >= 0:
+        new_file = new_file.replace('–', '\t')
 
-    if new_file.find(' Official HD Audio') >= 0:  # regular double quote
+    if new_file.find('Official HD Audio') >= 0:  # regular double quote
         new_file = new_file.replace(' Official HD Audio', '')
 
-    if new_file.find(' Official Music Video') >= 0:  # regular double quote
+    if new_file.find('Official Music Video') >= 0:  # regular double quote
         new_file = new_file.replace(' Official Music Video', '')
 
     if new_file.find('NA_') >= 0:
@@ -228,6 +216,7 @@ class ControlPanel(object):
     def set_list_widget(self, list_widget):
         self.list_widget = list_widget
         self.list_widget.tree.bind('<Double-1>', self.double_click)
+        self.list_widget.tree.bind('<BackSpace>', self.delete_click)
 
 
     def _reload(self):
@@ -244,10 +233,17 @@ class ControlPanel(object):
         self.player = PlayerThread(idx, list)
         self.player.start()
 
+
     def double_click(self, event):
         item = self.list_widget.tree.focus()
         print("double: {}".format(item))
-        #self._play_file()
+        self._play_file()
+    def delete_click(self, event):
+        item = self.list_widget.tree.selection()[0]
+        print("delete: {}".format(item))
+        os.remove(item)
+        self._reload()
+
 
     def _stop_play(self):
         item_name = self.list_widget.tree.selection()
@@ -284,7 +280,6 @@ class FilePickerListbox(object):
         self.tree.drag_source_register(1, DND_FILES)
         self.tree.dnd_bind('<<DragInitCmd>>', self.drag_init)
         self.tree.dnd_bind('<<DragEndCmd>>', self.drag_end)
-        self.tree.dnd_bind('<<DragDataGetCmd>>', self.drag_data_get)
 
     def _set_file_header(self):
         msg = 'Files: ({})'.format(len(self.tree.get_children()))
@@ -295,28 +290,25 @@ class FilePickerListbox(object):
         data = ()
         self.item_name = self.tree.selection()
         if self.item_name:
-            #logit("doing drag: {}".format(self.item_name))
+            print("doing drag: {}".format(self.item_name))
             self.tree.dragging = True
-            return ((COPY), (DND_FILES), (self.item_name))
+            #return ((ASK, COPY, MOVE, LINK), (DND_TEXT, DND_FILES), (self.item_name))
+            #return ((LINK), (DND_TEXT, DND_FILES), ("file:///tmp/test.wav"))
+            #return ((LINK), (DND_TEXT, DND_FILES), ("file:///tmp/test.wav"))
+            return (COPY, (DND_TEXT), ("file:///tmp/test.wav"))
         else:
-            return 'break'
-
-    def drag_data_get(self, event):
-        pass
-        #logit("drag data get")
+            return ((COPY), (DND_TEXT, DND_FILES), ("file:///tmp/test.wav"))
 
     def drag_end(self, event):
         # reset the "dragging" flag to enable drops again
         file_name = self.item_name[0]
-        #logit("drag end:" + file_name)
+        print("drag end:" + file_name)
         # Don't delte LID files since they are reused.
         if False and file_name.find("/LID_") < 0:
             self.tree.delete(file_name)
             threading.Thread(target=delete_file_after_delay, args=([file_name])).start()
             self.tree.dragging = False
 
-    def drag_data_get(self, event):
-        logit("drag data get")
 
     def _setup_widgets(self, frame):
         container = ttk.Frame(frame)
