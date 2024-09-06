@@ -7,6 +7,7 @@ are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been in
 included in the user's $PATH.
 '''
 import glob, subprocess, threading, time, os, datetime, re
+import urllib.parse
 from os.path import expanduser
 from distutils import spawn
 from pathlib import Path
@@ -19,6 +20,7 @@ from audio_trimmer import trim_audio
 import pyaudio, wave
 
 DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
+STAGING_DIR = DOWNLOAD_DIR + "/staging"
 YTDL_PATH = None
 
 
@@ -291,22 +293,22 @@ class FilePickerListbox(object):
         self.item_name = self.tree.selection()
         if self.item_name:
             print("doing drag: {}".format(self.item_name))
+            path, name = os.path.split(self.item_name[0])
+            stage_file = STAGING_DIR + "/" + name
+            os.rename(self.item_name[0], stage_file)
             self.tree.dragging = True
-            #return ((ASK, COPY, MOVE, LINK), (DND_TEXT, DND_FILES), (self.item_name))
-            #return ((LINK), (DND_TEXT, DND_FILES), ("file:///tmp/test.wav"))
-            #return ((LINK), (DND_TEXT, DND_FILES), ("file:///tmp/test.wav"))
-            return (COPY, (DND_TEXT), ("file:///tmp/test.wav"))
+            return ((COPY, MOVE), (DND_FILES), (urllib.parse.quote(stage_file)))
         else:
-            return ((COPY), (DND_TEXT, DND_FILES), ("file:///tmp/test.wav"))
+            return ((), (), ()) # what to return here?
 
     def drag_end(self, event):
+        action = event.action
         # reset the "dragging" flag to enable drops again
         file_name = self.item_name[0]
-        print("drag end:" + file_name)
-        # Don't delte LID files since they are reused.
-        if False and file_name.find("/LID_") < 0:
+        print("drag end: {}, {}".format(action, file_name))
+        # Don't remove LID files since they are reused.
+        if file_name.find("/LID_") < 0:
             self.tree.delete(file_name)
-            threading.Thread(target=delete_file_after_delay, args=([file_name])).start()
             self.tree.dragging = False
 
 
