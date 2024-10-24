@@ -143,6 +143,11 @@ def check_if_done(command_thread):
                      (errmsg.find('You may experience throttling for some formats') > 0) | \
                      (errmsg.find(' 403') > 0))
 
+        if errmsg.find('File name too long') > 0:
+            tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name')
+            control_panel._fetch_url(False)
+            return
+
         if (command_thread.process.returncode == 0 and (ignoreMsg or len(errmsg) < 4)):
             res = str(command_thread.stdout, 'utf-8')
             idx1 = res.rfind("Destination: ") + 13
@@ -252,15 +257,17 @@ class ControlPanel(object):
         print("stop play")
         self.player.stop_player()
 
-    def _fetch_url(self):
+    def _fetch_url(self, useFullName=True):
         #control_panel.url.config({"background": "White"})
         #control_panel.url.update()
 
         if not YTDL_PATH:
             tk.messagebox.showwarning('Error', "youtube-dl was not found. please check your installation.")
         else:
+            artistTerm = '%(artist)s' if useFullName else 'UNKNOWN'
             logit("load url: " + self.urlEntry.get())
-            out_file = '"{}/%(artist)s_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR)
+            out_file = '"{}/{}_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR, artistTerm)
+
             cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
             logit("cmd: " + cmd)
             download_thread = CommandThread(cmd)
