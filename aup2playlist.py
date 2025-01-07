@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/python3
 #
 # generates a Zookeeper playlist import file from an Audacity project
 # file, e.g. .aup

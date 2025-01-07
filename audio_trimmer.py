@@ -7,7 +7,7 @@ import os, sys, subprocess, datetime, glob, pathlib
 # return time length in seconds of an mp3 file using ffmpeg or -1 if invalid.
 # assumes user has ffmpeg in PATH.
 def execute_ffmpeg_command(cmd):
-    cmd = "/usr/local/bin/ffmpeg -hide_banner " + cmd
+    cmd = "/usr/bin/ffmpeg -hide_banner " + cmd
     #print("Execute: {}".format(cmd))
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (output, err) = p.communicate()
@@ -19,7 +19,8 @@ def execute_ffmpeg_command(cmd):
 # return start gap, end gap and duration in seconds
 def get_gap_info(filePath):
     start_gap = end_gap = duration = 0
-    cmd = '/usr/local/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
+    #cmd = '/usr/local/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
+    cmd = '/usr/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (output, err) = p.communicate()
     p_status = p.wait()

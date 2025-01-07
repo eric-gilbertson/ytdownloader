@@ -9,7 +9,7 @@ included in the user's $PATH.
 import glob, subprocess, threading, time, os, datetime, re
 import urllib.parse
 from os.path import expanduser
-from distutils import spawn
+from shutil import which
 from pathlib import Path
 import tkinter as tk
 import tkinter.messagebox
@@ -139,16 +139,19 @@ def check_if_done(command_thread):
         errmsg = str(command_thread.stderr) # returns '\\\' even when there is no error.
         length = len(errmsg)
 
+        fatalMsg = errmsg.find("HTTP Error 403 Forbidden") > 0
         ignoreMsg = ((errmsg.find('Skipping player responses from android') > 0) | \
                      (errmsg.find('You may experience throttling for some formats') > 0) | \
-                     (errmsg.find(' 403') > 0))
+                     (errmsg.find('Signature extraction failed:') > 0))
+        print("msg: {}, {}".format(ignoreMsg, fatalMsg))
+        ignoreMsg = (ignoreMsg == True) and (fatalMsg == False)
 
         if errmsg.find('File name too long') > 0:
             tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name')
             control_panel._fetch_url(False)
             return
 
-        if (command_thread.process.returncode == 0 and (ignoreMsg or len(errmsg) < 4)):
+        if (command_thread.process.returncode == 0 and (fatalMsg == False) and (ignoreMsg or len(errmsg) < 4)):
             res = str(command_thread.stdout, 'utf-8')
             idx1 = res.rfind("Destination: ") + 13
             idx2 = res.find(".wav", idx1)
@@ -296,6 +299,7 @@ class FilePickerListbox(object):
 
 
     def drag_init(self, event):
+        print("drag init")
         data = ()
         self.item_name = self.tree.selection()
         if self.item_name:
@@ -309,6 +313,7 @@ class FilePickerListbox(object):
             return ((), (), ()) # what to return here?
 
     def drag_end(self, event):
+        print("drag end")
         action = event.action
         # reset the "dragging" flag to enable drops again
         file_name = self.item_name[0]
@@ -396,10 +401,10 @@ if __name__ == '__main__':
     root.geometry("560x490")
     control_panel = ControlPanel(root)
 
-    YTDL_PATH = spawn.find_executable('yt-dlp')
+    YTDL_PATH = which('yt-dlp')
     #YTDL_PATH = "/Users/Barbara/src/youtube-dl/youtube-dl"
 
-    logit("ytdl path: " + YTDL_PATH)
+    logit("ytdl path: {}".format(YTDL_PATH))
 
     if not os.path.exists(DOWNLOAD_DIR):
         os.makedirs(DOWNLOAD_DIR)
