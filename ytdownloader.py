@@ -6,7 +6,7 @@ are dragged, e.g. it assumes that the target tool creates its own copy of the fi
 are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been installed and
 included in the user's $PATH.
 '''
-import glob, subprocess, threading, time, os, datetime, re
+import glob, subprocess, threading, time, os, datetime, re, shutil
 import urllib.parse
 from os.path import expanduser
 from shutil import which
@@ -19,8 +19,8 @@ from tkinterdnd2 import *
 from audio_trimmer import trim_audio
 import pyaudio, wave
 
-DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
-STAGING_DIR = DOWNLOAD_DIR + "/staging"
+YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
+STAGING_DIR = YTDL_DOWNLOAD_DIR + "/staging"
 YTDL_PATH = None
 
 
@@ -90,13 +90,38 @@ def schedule_check(command_thread):
 
 
 def clean_filepath(filepath):
+    FIELD_SEPARATOR='^'
     new_file = filepath
 
     # remove parenthetical and bracketed text
-    new_file = re.sub("[\(\[].*?[\)\]]", "", new_file)
+    new_file = re.sub(r"[\(\[].*?[\)\]]", "", new_file)
+    new_file = re.sub(r'- \d+ -', FIELD_SEPARATOR, new_file)
+
+    # replace quoted song with seperator, e.g. John Craige "Judias"
+#    match = re.search(r"([^'\"]*)['\"]([^'\"]*)", new_file)
+#    if match and len(match.groups()) == 2:
+#        new_file = f"{match.group(1)} {FIELD_SEPARATOR} {match.group(2)}"
+
+    # replace quoted song with seperator, e.g. John Craige "Judias"
+    WIERD_QUOTE = '＂'
+    if new_file.find(WIERD_QUOTE) > 0:
+        new_file = new_file.replace(WIERD_QUOTE, FIELD_SEPARATOR, 1)
+        new_file = new_file.replace(WIERD_QUOTE, '', 1)
+
+    if new_file.find('Official Track') >= 0:
+        new_file = new_file.replace('Official Track', '')
+
+    if new_file.find('OFFICIAL MUSIC VIDEO') >= 0:
+        new_file = new_file.replace('OFFICIAL MUSIC VIDEO', '')
+
+    if new_file.find('NA_') >= 0:
+        new_file = new_file.replace('NA_', '')
 
     if new_file.find('｜') >= 0:
-        new_file = new_file.replace('｜', '\t')
+        new_file = new_file.replace('｜', FIELD_SEPARATOR)
+
+    if new_file.find(' : ') >= 0:
+        new_file = new_file.replace(' : ', FIELD_SEPARATOR)
 
     if new_file.find('＂') >= 0:  # special fat double quote from &quot; in html
         new_file = new_file.replace('＂', '')
@@ -105,10 +130,13 @@ def clean_filepath(filepath):
         new_file = new_file.replace('"', '')
 
     if new_file.find('-') >= 0:
-        new_file = new_file.replace('-', '\t')
+        new_file = new_file.replace('-', FIELD_SEPARATOR)
+
+    if new_file.find('_') >= 0:
+        new_file = new_file.replace('_', ' ' + FIELD_SEPARATOR + ' ')
 
     if new_file.find('–') >= 0:
-        new_file = new_file.replace('–', '\t')
+        new_file = new_file.replace('–', FIELD_SEPARATOR)
 
     if new_file.find('Official HD Audio') >= 0:  # regular double quote
         new_file = new_file.replace(' Official HD Audio', '')
@@ -116,12 +144,16 @@ def clean_filepath(filepath):
     if new_file.find('Official Music Video') >= 0:  # regular double quote
         new_file = new_file.replace(' Official Music Video', '')
 
-    if new_file.find('NA_') >= 0:
-        new_file = new_file.replace('NA_', '')
-
     # just in case we lost the suffix in the transform.
-    if not new_file.endswith('.wav'):
-        new_file += '.wav'
+#    if not new_file.endswith('.wav'):
+#        new_file += '.wav'
+
+    # trim secondary artist names, e.g. anything after a comma
+    nameAr = new_file.split(FIELD_SEPARATOR)
+    commaIdx = nameAr[0].find(',')
+    print(f"tp: {nameAr[0]}, {commaIdx}")
+    if commaIdx > 0 and len(nameAr) > 1:
+        new_file = f"{nameAr[0][0:commaIdx]} {FIELD_SEPARATOR} {nameAr[1]}"
 
     if new_file != filepath:
         logit("Rename: {}, {}".format(filepath, new_file))
@@ -269,7 +301,7 @@ class ControlPanel(object):
         else:
             artistTerm = '%(artist)s' if useFullName else 'UNKNOWN'
             logit("load url: " + self.urlEntry.get())
-            out_file = '"{}/{}_%(title)s.%(ext)s"'.format(DOWNLOAD_DIR, artistTerm)
+            out_file = '"{}/{}_%(title)s.%(ext)s"'.format(YTDL_DOWNLOAD_DIR, artistTerm)
 
             cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
             logit("cmd: " + cmd)
@@ -305,10 +337,17 @@ class FilePickerListbox(object):
         if self.item_name:
             print("doing drag: {}".format(self.item_name))
             path, name = os.path.split(self.item_name[0])
-            stage_file = STAGING_DIR + "/" + name
-            os.rename(self.item_name[0], stage_file)
+            if name.find("LID_") == 0:
+                stage_file = self.item_name
+            else:
+                # convert spaces to En Quad space because DnD uses space as a file seperator
+                name_safe = name.replace(' ', '\u2000')
+                stage_file = STAGING_DIR + "/" + name_safe
+                print("move {} -> {}".format(self.item_name[0], stage_file))
+                os.rename(self.item_name[0], stage_file)
+
             self.tree.dragging = True
-            return ((COPY, MOVE), (DND_FILES), (urllib.parse.quote(stage_file)))
+            return ((COPY, MOVE), (DND_FILES), stage_file)
         else:
             return ((), (), ()) # what to return here?
 
@@ -321,7 +360,8 @@ class FilePickerListbox(object):
         # Don't remove LID files since they are reused.
         if file_name.find("/LID_") < 0:
             self.tree.delete(file_name)
-            self.tree.dragging = False
+
+        self.tree.dragging = False
 
 
     def _setup_widgets(self, frame):
@@ -344,25 +384,26 @@ class FilePickerListbox(object):
         self.populate_list()
 
     def populate_list(self):
-        path = DOWNLOAD_DIR + "/*"
-        prefix_len = len(path) - 1
-        prefix = path[0:prefix_len]
-        files = glob.glob(path)
+        ytdl_path = YTDL_DOWNLOAD_DIR + "/*"
+
+        # move any MPE downloads (format <ARTIST> - <INDEX> - <TITLE>) into the YTDL cache
+        mpe_path = expanduser("~") + "/Downloads/"
+        mpe_path = mpe_path + "*- [123456789] -*"
+        files = glob.glob(mpe_path + ".mp3") + glob.glob(mpe_path + ".wav")
+        for mpefile in files:
+            print("move file: " + mpefile)
+            shutil.move(mpefile, YTDL_DOWNLOAD_DIR)
+
+        prefix_len = len(ytdl_path) - 1
+        prefix = ytdl_path[0:prefix_len]
+        files = glob.glob(ytdl_path)
 
         mergeFiles = []
-        for file in files:
-            name = file[prefix_len: len(file)]
-            mergeFiles.append([name, file])
-
-        path = expanduser("~") + "/Downloads/"
-        prefix_len = len(path)
-        path = path + "*- * - *.mp3"
-        prefix = path[0:prefix_len]
-        files = glob.glob(path)
-
-        for file in files:
-            name = file[prefix_len: len(file)]
-            mergeFiles.append([name, file])
+        for filepath in files:
+            filepath = clean_filepath(filepath)
+            trim_audio(filepath)
+            name = filepath[prefix_len: len(filepath)]
+            mergeFiles.append([name, filepath])
 
         mergeFiles.sort(key=lambda x: x[0])
 
@@ -397,17 +438,18 @@ def resize(event):
 
 if __name__ == '__main__':
     root = TkinterDnD.Tk()
+    #root = tk.Tk()
     root.title("Youtube Download Tool")
     root.geometry("560x490")
     control_panel = ControlPanel(root)
 
-    YTDL_PATH = which('yt-dlp')
+    YTDL_PATH = shutil.which('yt-dlp')
     #YTDL_PATH = "/Users/Barbara/src/youtube-dl/youtube-dl"
 
     logit("ytdl path: {}".format(YTDL_PATH))
 
-    if not os.path.exists(DOWNLOAD_DIR):
-        os.makedirs(DOWNLOAD_DIR)
+    if not os.path.exists(YTDL_DOWNLOAD_DIR):
+        os.makedirs(YTDL_DOWNLOAD_DIR)
 
     list_frame = tk.Frame(master=root, height=300)
     list_frame.pack(fill=tk.X)
