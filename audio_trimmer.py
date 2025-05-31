@@ -69,8 +69,6 @@ def trim_audio(srcFile):
         
         saveFile = os.path.dirname(srcFile) + srcpath.stem + ".trim" + srcpath.suffix
         os.rename(tmpFile, srcFile)
-    else:
-        print("no change: {}, {:0.2f}, {:0.2f}".format(srcFile, start_trim, end_trim))
         
 
 
