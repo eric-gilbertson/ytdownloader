@@ -59,8 +59,9 @@ class AudioPlaylistApp(BaseTk):
 
         # ----- State -----
         self._stop_playback = threading.Event()
-        self._paused_for_pause_track = False
+        self._paused = False
         self._play_thread = None
+        self._track_id = None
         self._audio_total_ms = 0
         self._audio_pos_ms = 0
 
@@ -83,7 +84,6 @@ class AudioPlaylistApp(BaseTk):
 
         # Initial output devices + auto-refresh
         self._refresh_output_devices()
-        #self.after(self._device_refresh_ms, self._schedule_device_refresh)
 
     # ======================= UI BUILD =======================
     def _build_topbar(self):
@@ -96,16 +96,8 @@ class AudioPlaylistApp(BaseTk):
         tk.Button(top, text="Load", command=self.load_playlist).pack(side="left", padx=(0, 12), pady=2)
         tk.Button(top, text="Play", command=self.play_selected).pack(side="left", padx=(0, 12), pady=2)
 
-        tk.Label(top, text="Output:").pack(side="left", padx=(6, 4))
-        self.output_combo = ttk.Combobox(top, state="readonly", width=30)
-        self.output_combo.pack(side="left", padx=(0, 6), pady=2)
-
-        # Status hints if deps missing
-        if pyaudio is None or AudioSegment is None:
-            missing = []
-            if pyaudio is None: missing.append("PyAudio")
-            if AudioSegment is None: missing.append("pydub/ffmpeg")
-            tk.Label(top, text=f"(install: {' & '.join(missing)})", fg="#9f1239").pack(side="left", padx=6)
+        self.output_combo = ttk.Combobox(top, state="readonly", width=15)
+        self.output_combo.pack(side="right", padx=(0, 6), pady=2)
 
         if not DND_AVAILABLE:
             tk.Label(top, text="(Drag&Drop disabled: pip install tkinterdnd2)", fg="#b45309").pack(side="left", padx=8)
@@ -138,6 +130,9 @@ class AudioPlaylistApp(BaseTk):
         self.tree.bind("<B1-Motion>", self._on_drag_motion_internal, add="+")
         self.tree.bind("<ButtonRelease-1>", self._on_drop_internal, add="+")
         self.tree.bind("<Leave>", lambda e: self._hide_insert_line(), add="+")
+
+        self.tree.bind("<Shift-Up>", lambda e: self.on_shift_arrow(e, "up"))
+        self.tree.bind("<Shift-Down>", lambda e: self.on_shift_arrow(e, "down"))
 
         # External Finder drag/drop (only if tkinterdnd2 available)
         if DND_AVAILABLE and DND_FILES is not None:
@@ -188,7 +183,7 @@ class AudioPlaylistApp(BaseTk):
             out = internal[:1] + others
         return out
 
-    def _refresh_output_devices(self):
+    def _refresh_output_devices(self, event=None):
         devices = self._list_output_devices()
         if devices != self.output_devices:
             old = self.output_combo.get()
@@ -201,10 +196,6 @@ class AudioPlaylistApp(BaseTk):
             else:
                 self.output_combo.set("")
 
-    def _schedule_device_refresh(self):
-        self._refresh_output_devices()
-        self.after(self._device_refresh_ms, self._schedule_device_refresh)
-
     def _get_selected_device_index(self):
         idx = self.output_combo.current()
         if 0 <= idx < len(self.output_devices):
@@ -212,6 +203,32 @@ class AudioPlaylistApp(BaseTk):
         return None
 
     # ======================= TREEVIEW HELPERS =======================
+    def on_shift_arrow(self, event, direction):
+        selection = self.tree.selection()
+        items = self.tree.get_children("")
+
+        if not selection:
+            # if nothing selected, start at first/last
+            idx = 0 if direction == "down" else len(items) - 1
+        else:
+            # last focused item index
+            focus = self.tree.focus() or selection[-1]
+            try:
+                idx = items.index(focus)
+            except ValueError:
+                idx = 0
+
+            idx = max(0, min(len(items) - 1, idx + (1 if direction == "down" else -1)))
+
+        new_item = items[idx]
+
+        # Add new item to selection
+        self.tree.selection_add(new_item)
+        self.tree.focus(new_item)
+        self.tree.see(new_item)
+        return "break"  # prevent default move
+
+
     def _renumber_rows(self):
         for i, item in enumerate(self.tree.get_children(""), start=1):
             vals = self.tree.item(item, "values")
@@ -421,6 +438,8 @@ class AudioPlaylistApp(BaseTk):
         if not fp:
             return
         try:
+            infoAr = []
+            total_secs = 0
             with open(fp, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -433,6 +452,15 @@ class AudioPlaylistApp(BaseTk):
                         if os.path.exists(line):
                             name = os.path.basename(line) if len(infoAr) == 0 else infoAr[1]
                             self.tree.insert("", "end", values=("", name), tags=(line,))
+                            infoAr = []
+                            if not name.startswith("pause."):
+                                audio = AudioSegment.from_file(line)
+                                total_secs = total_secs + len(audio)/1000
+
+            mins, secs = divmod(total_secs, 60)
+            hours, mins = divmod(mins, 60)
+            self.title(f"Time {hours}:{mins}:{secs}")
+
             self._renumber_rows()
         except Exception as e:
             print(f"[Load] Error: {e}")
@@ -444,8 +472,9 @@ class AudioPlaylistApp(BaseTk):
 
     def _toggle_play_pause(self):
         # If paused due to a pause-track, space resumes to next track.
-        if self._paused_for_pause_track:
-            self._paused_for_pause_track = False
+        if self._paused:
+            print("play from pause")
+            self._paused = False
             self._play_next_track()
             return
 
@@ -467,40 +496,31 @@ class AudioPlaylistApp(BaseTk):
         items = self.tree.get_children("")
         if index < 0 or index >= len(items):
             return
-        item = items[index]
-        path = self.tree.item(item, "tags")[0]
+
+        id = items[index]
+        path = self.tree.item(id, "tags")[0]
         name = os.path.basename(path).lower()
-        print(f"Play file: {name}")
+        print(f"Play file: {id}, {name}")
+        self._track_id = id
+        self.title(f"{name} - {id} - {index+1}")
 
         if name in ("pause.mp3", "pause.wav"):
-            self._paused_for_pause_track = True
+            self._paused = True
             self.countdown_label.config(text="00:00")
             return
 
-        self._paused_for_pause_track = False
+        self._paused = False
 
         # Stop current playback if any
         self.stop_audio()
 
-        if pyaudio is None or AudioSegment is None:
-            print("[Play] Install PyAudio + pydub/ffmpeg.")
-            return
-
-        # Load audio via pydub
-        try:
-            audio = AudioSegment.from_file(path)
-        except Exception as e:
-            print(f"[Play] Failed to load audio: {e}")
-            return
-
+        audio = AudioSegment.from_file(path)
         self._audio_total_ms = len(audio)
         self._audio_pos_ms = 0
         self._stop_playback.clear()
 
         # Start audio thread
-        print("create thread")
         self._play_thread = threading.Thread(target=self._stream_audio_thread, args=(audio,), daemon=True)
-        print("start thread")
         self._play_thread.start()
 
         # Start countdown UI updates
@@ -558,15 +578,12 @@ class AudioPlaylistApp(BaseTk):
         self._stop_playback.clear()
         self._audio_pos_ms = 0
         self.countdown_label.config(text="00:00")
+        self._refresh_output_devices() # pick up any new devices
 
     def _play_next_track(self):
         items = self.tree.get_children("")
-        if not items:
-            return
-        sel = self.tree.selection()
-        if not sel:
-            return
-        idx = items.index(sel[0])
+
+        idx = items.index(self._track_id)
         if idx < len(items) - 1:
             next_item = items[idx + 1]
             self.tree.selection_set(next_item)
@@ -575,11 +592,6 @@ class AudioPlaylistApp(BaseTk):
 
             path = self.tree.item(next_item, "tags")[0]
             name = os.path.basename(path).lower()
-            if name in ("pause.mp3", "pause.wav"):
-                self._paused_for_pause_track = True
-                self.countdown_label.config(text="00:00")
-                return
-
             self._play_index(idx + 1)
 
     # ----- Countdown updates -----
