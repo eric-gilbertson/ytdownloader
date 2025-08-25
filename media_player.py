@@ -19,7 +19,7 @@ Optional deps (recommended):
     pip install pyaudio pydub tkinterdnd2
     brew install ffmpeg
 """
-
+import math
 import os
 import shlex
 import threading
@@ -48,6 +48,22 @@ except Exception:
     DND_FILES = None
     DND_AVAILABLE = False
 
+
+def HMS_from_seconds(seconds):
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    hms_str = f'{math.floor(hours):d}:{math.floor(minutes):02d}:{math.floor(secs):02d}'
+    return hms_str
+
+def seconds_from_HMS(time_hms):
+    seconds = 0
+    timeAr = time_hms.split(':')
+    if len(timeAr) == 3:
+        seconds =  int(timeAr[0])*60*60 + int(timeAr[1])*60 + int(timeAr[2])
+    else:
+        seconds =  int(timeAr[0])*60 + int(timeAr[1])
+
+    return seconds
 
 class AudioPlaylistApp(BaseTk):
     def __init__(self):
@@ -109,10 +125,12 @@ class AudioPlaylistApp(BaseTk):
         wrap.grid_rowconfigure(0, weight=1)
 
         # Treeview
-        self.tree = ttk.Treeview(wrap, columns=("num", "name"), show="headings", selectmode="extended")
+        self.tree = ttk.Treeview(wrap, columns=("num", "start_time", "duration", "name"), show="headings", selectmode="extended")
         self.tree.heading("num", text="#")
         self.tree.heading("name", text="File")
         self.tree.column("num", width=50, anchor="center", stretch=False)
+        self.tree.column("start_time", width=50, anchor="center", stretch=False)
+        self.tree.column("duration", width=50, anchor="center", stretch=False)
         self.tree.column("name", anchor="w", stretch=True)
         self.tree.grid(row=0, column=0, sticky="nsew")
 
@@ -230,10 +248,23 @@ class AudioPlaylistApp(BaseTk):
 
 
     def _renumber_rows(self):
+        start_time_secs = 0
         for i, item in enumerate(self.tree.get_children(""), start=1):
             vals = self.tree.item(item, "values")
-            if len(vals) == 2:
-                self.tree.item(item, values=(i, vals[1]))
+            duration_str = vals[2]
+            name = vals[3]
+
+            duration_secs = 0
+            if duration_str == '-1' and not name.startswith('pause'):
+                file_path = self.tree.item(item, "tags")[0]
+                duration_secs = len(AudioSegment.from_file(file_path)) / 1000
+            else:
+                duration_secs = seconds_from_HMS(duration_str)
+
+            start_time_HMS = HMS_from_seconds(start_time_secs)
+            duration_hms = HMS_from_seconds(duration_secs)
+            self.tree.item(item, values=(i, start_time_HMS, duration_hms, name))
+            start_time_secs = start_time_secs + duration_secs
 
     def _delete_selected(self):
         for item in self.tree.selection():
@@ -378,7 +409,7 @@ class AudioPlaylistApp(BaseTk):
             if not os.path.isfile(path):
                 continue
             name = os.path.basename(path)
-            self.tree.insert("", insert_index, values=("", name), tags=(path,))
+            self.tree.insert("", insert_index, values=(insert_index+1, "-1", "-1", name), tags=(path,))
             insert_index += 1  # subsequent files go after
         self._renumber_rows()
         self._hide_insert_line()
@@ -437,11 +468,16 @@ class AudioPlaylistApp(BaseTk):
             fp = filedialog.askopenfilename(filetypes=[("M3U Playlist", "*.m3u")], title="Load Playlist")
         if not fp:
             return
+
+        children = self.tree.get_children() # used self.tree instead
+        for item in children: # used self.tree instead
+            self.tree.delete(item)
+
         try:
             infoAr = []
             total_secs = 0
             with open(fp, "r", encoding="utf-8") as f:
-                for line in f:
+                for idx, line in enumerate(f, start=1):
                     line = line.strip()
                     if line.startswith("#EXTINF:"):
                         infoAr =  line.split(":")[1].split(',')
@@ -451,17 +487,16 @@ class AudioPlaylistApp(BaseTk):
 
                         if os.path.exists(line):
                             name = os.path.basename(line) if len(infoAr) == 0 else infoAr[1]
-                            self.tree.insert("", "end", values=("", name), tags=(line,))
+                            seconds = 0 if name.startswith("pause.") else len(AudioSegment.from_file(line))/1000
+                            track_start = HMS_from_seconds(total_secs)
+                            track_duration = HMS_from_seconds(seconds)
+                            self.tree.insert("", "end", values=(idx, track_start, track_duration, name), tags=(line,))
                             infoAr = []
-                            if not name.startswith("pause."):
-                                audio = AudioSegment.from_file(line)
-                                total_secs = total_secs + len(audio)/1000
+                            total_secs = total_secs + seconds
 
-            mins, secs = divmod(total_secs, 60)
-            hours, mins = divmod(mins, 60)
-            self.title(f"Time {hours}:{mins}:{secs}")
-
+            self.title(HMS_from_seconds(total_secs))
             self._renumber_rows()
+
         except Exception as e:
             print(f"[Load] Error: {e}")
 
