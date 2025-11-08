@@ -401,7 +401,7 @@ class AudioPlaylistApp(BaseTk):
         self._hide_insert_line()
 
         # Internal reorder bindings - ejg
-        self.tree.bind("<Double-1>", lambda e: self._toggle_play_pause())
+        self.tree.bind("<Double-1>", lambda e: self.play_selected())
         self.tree.bind("<ButtonPress-1>", self._tv_on_btn1_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_drag_motion_internal, add="+")
         self.tree.bind("<ButtonRelease-1>", self._on_drop_internal, add="+")
@@ -994,6 +994,7 @@ class AudioPlaylistApp(BaseTk):
         sel = self.tree.selection()
         if not sel:
             return
+
         idx = self.tree.index(sel[0])
         self._play_index(idx)
 
