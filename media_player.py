@@ -15,6 +15,8 @@ VLC like media player optimized for use in live radio features include:
 - Output device selection (first entry tries to be internal speakers)
 - Save/Load .m3u playlists (ignores non .wav/.mp3 lines)
 """
+from os.path import expanduser
+
 from m3uToPlaylist import getTitlesYouTube
 import json, re, datetime
 import math, os, shlex, socket, ssl, threading, traceback
@@ -25,6 +27,10 @@ from tkinter import simpledialog
 from tkinter import ttk, filedialog, messagebox
 import pyaudio
 from pydub import AudioSegment
+from track_downloader import TrackDownloader
+
+# download directory to the staging dir
+YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl/staging"
 
 # ---------- Optional DnD (Finder drag/drop) ----------
 try:
@@ -40,6 +46,7 @@ def logit(msg):
     timestr = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S: ")
     with open('/tmp/player_log.txt', 'a') as logfile:
         logfile.write(timestr + msg + '\n')
+
 
 def is_stop_file(file_name):
     return file_name == 'pause' or file_name == 'break'
@@ -314,7 +321,7 @@ class AudioPlaylistApp(BaseTk):
         self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
         self.playlist = Playlist()
-
+        self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
 
         self._dragging_item = None          # internal reorder
         self._dragging_start_id = None          # internal reorder
@@ -326,10 +333,13 @@ class AudioPlaylistApp(BaseTk):
 
         # ----- Layout -----
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(0, minsize=30)
+        self.grid_rowconfigure(1, minsize=30)
+        self.grid_rowconfigure(2, weight=1)
 
-        self._build_topbar()
-        self._build_treeview()
+        self._build_topbar(0)
+        self._build_urlentry(1)
+        self._build_treeview(2)
         #self._build_countdown()
 
         self._bind_shortcuts()
@@ -344,16 +354,37 @@ class AudioPlaylistApp(BaseTk):
 
         self.destroy()
 
-    # ======================= UI BUILD =======================
-    def _build_topbar(self):
-        top = tk.Frame(self, height=30)
-        top.grid(row=0, column=0, sticky="ew")
-        self.grid_rowconfigure(0, minsize=30)
+    def _fetch_track(self, useFullName=True):
+            trackurl = self.urlEntry.get() 
+            self.downloader.fetch_track(trackurl, useFullName)
+            self.url.config(cursor="clock")
+            self.url.update()
+                
+    def _fetch_track_done(self):
+        self.bell()
+        if self.downloader.name_too_long:
+            if tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
+                self.downloader.fetch_track(False)
+        elif self.downloader.track_file:
+            self.url.delete(0, "end")
+            self.url.config(cursor="")
+            self.url.update()
 
-        tk.Button(top, text="Stop", command=self.stop_audio).pack(side="left", padx=(6, 6), pady=2)
+            #append track to current list
+            self._insert_track(-1, self.downloader.artist, self.downloader.title, self.downloader.track_file, True)
+        else:
+            tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
+                
+
+    # ======================= UI BUILD =======================
+    def _build_topbar(self, rownum):
+        top = tk.Frame(self, height=30)
+        top.grid(row=rownum, column=0, sticky="ew")
+
+        tk.Button(top, text="■", width=3, command=self.stop_audio).pack(side="left", padx=(6, 6), pady=2)
+        tk.Button(top, text="▶", width=3, command=self.play_selected).pack(side="left", padx=(0, 12), pady=2)
         tk.Button(top, text="Save", command=self.save_playlist).pack(side="left", padx=(0, 6), pady=2)
         tk.Button(top, text="Load", command=self.load_playlist).pack(side="left", padx=(0, 12), pady=2)
-        tk.Button(top, text="Play", command=self.play_selected).pack(side="left", padx=(0, 12), pady=2)
         tk.Button(top, text="Fill Albums", command=self.fill_albums).pack(side="left", padx=(0, 12), pady=2)
         tk.Button(top, text="MP3", command=self.save_mp3).pack(side="left", padx=(0, 6), pady=2)
 
@@ -362,12 +393,25 @@ class AudioPlaylistApp(BaseTk):
         self.output_combo = ttk.Combobox(top, state="readonly", width=15)
         self.output_combo.pack(side="right", padx=(0, 6), pady=2)
 
-        if not DND_AVAILABLE:
-            tk.Label(top, text="(Drag&Drop disabled: pip install tkinterdnd2)", fg="#b45309").pack(side="left", padx=8)
+    # Youtube URL entry row
+    def _build_urlentry(self, rownum):
+        bottom = tk.Frame(self)
+        bottom.grid(row=rownum, column=0, sticky="ew")
+        lbl = tk.Label(bottom, text='URL:').pack(side='left')
+        self.urlEntry = tk.StringVar()
+        self.url = tk.Entry(bottom, textvariable=self.urlEntry, width=39)
+        self.url.pack(side='left')
+        self.url.bind('<Return>', self._on_url_enter)
+        button = tk.Button(bottom, command= self._fetch_track, text="Fetch", width=5, fg="black")  
+        button.pack(side='left')
 
-    def _build_treeview(self):
+    def _on_url_enter(self, widget):
+        logit("enter: " + self.url.get())
+        self._fetch_track()
+
+    def _build_treeview(self, rownum):
         wrap = ttk.Frame(self)
-        wrap.grid(row=1, column=0, sticky="nsew")
+        wrap.grid(row=rownum, column=0, sticky="nsew")
         wrap.grid_columnconfigure(0, weight=1)
         wrap.grid_rowconfigure(0, weight=1)
 
@@ -689,9 +733,11 @@ class AudioPlaylistApp(BaseTk):
         else:
             insert_index = len(siblings)
 
+        file_count = len(files) - 1
         for path in files:
             path = path.strip()
             if not path or not path.lower().endswith((".mp3", ".wav")) or not os.path.isfile(path):
+                tk.messagebox.showwarning(title="Error", message=f'Ignoring invalid file:" {path}')
                 continue
 
             artist = ''
@@ -701,20 +747,30 @@ class AudioPlaylistApp(BaseTk):
                 artist = titleAr[0].strip()
                 title = titleAr[1].strip()
 
-            duration = 0 if is_stop_file(title) else len(AudioSegment.from_file(path))/1000
-            tags = ()
-            if is_break_file(title):
-                tags = ("break")
-            elif is_pause_file(title):
-                tags = ("pause")
+            self._insert_track(insert_index, artist, title, path, file_count == 0)
 
-            id = self.tree.insert("", insert_index, values=(insert_index+1, "-1", artist, title, ""), tags=tags)
-            track = Track(id, artist, title, '', path, duration)
-            self.tree_datamap[id] = track
             insert_index += 1  # subsequent files go after
+            file_count = file_count - 1
 
-        self._renumber_rows()
         self._hide_insert_line()
+
+    def _insert_track(self, insert_index, artist, title, path, update_list):
+        if insert_index == -1:
+            insert_index = len(self.tree.get_children(""))
+
+        tags = ()
+        if is_break_file(title):
+            tags = ("break")
+        elif is_pause_file(title):
+            tags = ("pause")
+
+        duration = 0 if is_stop_file(title) else len(AudioSegment.from_file(path))/1000
+        id = self.tree.insert("", insert_index, values=(insert_index+1, "-1", artist, title, ""), tags=tags)
+        track = Track(id, artist, title, '', path, duration)
+        self.tree_datamap[id] = track
+    
+        if update_list:
+            self._renumber_rows()
 
     @staticmethod
     def _split_dnd_paths(data: str):
@@ -1110,7 +1166,7 @@ class AudioPlaylistApp(BaseTk):
     # ----- Countdown updates -----
     def _set_countdown(self, time_str):
         if time_str == '':
-            self.app_title = "Playlist Player"
+            self.app_title = "DJ Tool"
 
         self.title(f"{self.app_title} {time_str}")
 
