@@ -15,10 +15,11 @@ VLC like media player optimized for use in live radio features include:
 - Output device selection (first entry tries to be internal speakers)
 - Save/Load .m3u playlists (ignores non .wav/.mp3 lines)
 """
+import pathlib
 from os.path import expanduser
 
 from m3uToPlaylist import getTitlesYouTube
-import json, re, datetime
+import json, re, datetime, yaml
 import math, os, shlex, socket, ssl, threading, traceback
 import urllib.request
 from urllib.parse import unquote
@@ -44,7 +45,7 @@ except Exception:
 
 def logit(msg):
     timestr = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S: ")
-    with open('/tmp/player_log.txt', 'a') as logfile:
+    with open('/tmp/djplayer_log.txt', 'a') as logfile:
         logfile.write(timestr + msg + '\n')
 
 
@@ -136,6 +137,69 @@ class SelectAlbumDialog(simpledialog.Dialog):
         self.destroy()
     
         
+class UserConfiguration():
+    CONFIG_FILE = f'{pathlib.Path.home()}/.djtool.yaml'
+
+    def __init__(self, config_dict):
+        self.show_title = config_dict.get('show_title', '')
+
+    
+    def to_dict(self):
+        dict = {
+            'show_title' : self.show_title,
+        }
+        return dict
+
+    def to_yaml(self):
+        data = self.to_dict()
+        yaml_string = yaml.dump(data, sort_keys=False)
+        return yaml_string
+
+    @staticmethod
+    def load_config():
+        config_yaml = {}
+        try:
+            with open(UserConfiguration.CONFIG_FILE, 'r') as file:
+                config_yaml = yaml.safe_load(file)
+        except IOError:
+            pass
+
+        config = UserConfiguration(config_yaml)
+        return config
+
+    def save_config(self):
+        yaml = self.to_yaml()
+        try:
+            with open(UserConfiguration.CONFIG_FILE, 'w') as file:
+                file.write(yaml)
+        except IOError:
+            logit("Error saving configuration file: {ex}")
+
+
+
+class UserConfigurationDialog(simpledialog.Dialog):
+    def __init__(self, parent, user_configuration):
+
+        # store initial values
+        self.configuration = user_configuration
+        self.show_title_entry = None
+        self.ok_clicked = False
+        super().__init__(parent, "Configuration")
+
+    def body(self, master):
+        tk.Label(master, text="Show Title:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
+        self.show_title_entry = tk.Entry(master, width=40)
+        self.show_title_entry.insert(0, self.configuration.show_title)
+        self.show_title_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        return self.show_title_entry  # focus on artist field by default
+
+    def apply(self):
+        # When Save is clicked
+        self.ok_clicked = True
+        self.configuration.show_title = self.show_title_entry.get()
+        self.configuration.save_config()
+
 class TrackEditDialog(simpledialog.Dialog):
     def __init__(self, parent, hdr_title=None, track_artist="", track_title="", track_album=""):
 
@@ -205,7 +269,6 @@ class Playlist():
         self.track_idx = 0
         self.set_apikey()
         self.id = None
-        self.events = None
         self.ssl_context = ssl._create_unverified_context()
 
     def set_apikey(self):
@@ -256,26 +319,25 @@ class Playlist():
         req.add_header("Content-type", "application/vnd.api+json")
         req.add_header("Accept", "text/plain")
         req.add_header("X-APIKEY", self.API_KEY)
-        response = urllib.request.urlopen(req, data=data_json.encode('utf-8'), context=self.ssl_context)
-        if response.status != 200:
-            logit(f"Add track error: {response.status}, {url}")
-        else:
-            resp_obj  = json.loads(response.read())
-            logit(f"response: {resp_obj}")
+        
+        try:
+            with urllib.request.urlopen(req, data=data_json.encode('utf-8'), timeout=2, context=self.ssl_context) as response:
+                resp_obj  = json.loads(response.read())
+        except Exception as e:
+            logit(f"Exception posting track: {url}, {e}")
 
-    def get_show_playlist(self):
+    def get_show_playlist(self, show_title):
         self.id = None
-        self.events = None
 
         url = self.API_URL + '/api/v2/playlist?filter[date]=onNow'
-        req = urllib.request.Request(url, method='GET')
-        response = urllib.request.urlopen(req, context=self.ssl_context)
-        if response.status != 200:
-            logit(f"Zookeeper not available: {url}")
-            return False
+        resp_data = []
+        try:
+            with urllib.request.urlopen(url, timeout=2, context=self.ssl_context) as response:
+                resp_obj  = json.loads(response.read())
+                resp_data = resp_obj['data']
+        except Exception as e:
+                logit(f"Exception getting playlist: {url}, {e})")
 
-        resp_obj  = json.loads(response.read())
-        resp_data = resp_obj['data']
         if len(resp_data) == 0:
             logit(f"Playlist not available: {url}")
             return False
@@ -283,18 +345,11 @@ class Playlist():
         playlist = resp_obj['data'][0]
         attrs = playlist['attributes']
         show_name = attrs['name']
-        if show_name.lower() != "hanging in the boneyard":
+        if show_name.lower() != show_title.lower():
             logit(f"Playlist not active: {show_name}")
             return False
 
-        playlist_id = playlist['id']
-        url = self.API_URL + f'/api/v2/playlist/{playlist_id}/events'
-        req = urllib.request.Request(url, method='GET')
-        response = urllib.request.urlopen(req, context=self.ssl_context)
-        resp_obj  = json.loads(response.read())
-
-        self.id = playlist_id
-        self.events = resp_obj['data']
+        self.id = playlist['id']
         return True
 
 
@@ -322,6 +377,7 @@ class AudioPlaylistApp(BaseTk):
         self.live_show = tk.BooleanVar()
         self.playlist = Playlist()
         self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
+        self.configuration = UserConfiguration.load_config()
 
         self._dragging_item = None          # internal reorder
         self._dragging_start_id = None          # internal reorder
@@ -337,6 +393,7 @@ class AudioPlaylistApp(BaseTk):
         self.grid_rowconfigure(1, minsize=30)
         self.grid_rowconfigure(2, weight=1)
 
+        self._build_menubar()
         self._build_topbar(0)
         self._build_urlentry(1)
         self._build_treeview(2)
@@ -375,8 +432,32 @@ class AudioPlaylistApp(BaseTk):
         else:
             tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
                 
+    def _edit_configuration(self):
+        print("edit configuration")
+
+        dialog = UserConfigurationDialog(self, self.configuration)
+    
+        if dialog.ok_clicked:
+            logit("save configuration")
+        else:
+            logit("Canceled or no input provided.")
+ 
 
     # ======================= UI BUILD =======================
+    def _build_menubar(self):
+        menubar = tk.Menu(self)
+        filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Configure", command=self._edit_configuration)
+        filemenu.add_command(label="Load Playlist", command=self.load_playlist)
+        filemenu.add_command(label="Save Playlist", command=self.save_playlist)
+        menubar.add_cascade(label="File", menu=filemenu)
+
+        editmenu = tk.Menu(menubar, tearoff=0)
+        editmenu.add_command(label="Edit Track (Shift-Click)", command=self.edit_selected_track)
+        menubar.add_cascade(label="Edit", menu=editmenu)
+
+        self.config(menu=menubar)
+
     def _build_topbar(self, rownum):
         top = tk.Frame(self, height=30)
         top.grid(row=rownum, column=0, sticky="ew")
@@ -527,6 +608,15 @@ class AudioPlaylistApp(BaseTk):
         return None
 
     # ======================= TREEVIEW HELPERS =======================
+    def edit_selected_track(self):
+        selected_items = self.tree.selection()  # Get IDs of selected rows
+        if not selected_items:
+            return  # No rows selected
+    
+        id = selected_items[0]
+        track = self.tree_datamap[id]
+        self.edit_track(track)
+
     def edit_track(self, track):
         #self.withdraw()  # Hide main window
     
@@ -814,12 +904,12 @@ class AudioPlaylistApp(BaseTk):
             logit("[Save] No files to save.")
             return
 
-        fp = filedialog.asksaveasfilename(
+        filename = filedialog.asksaveasfilename(
             defaultextension=".mp3",
             filetypes=[("MP3", "*.mp3")],
             title="Save Audio As"
         )
-        if not fp:
+        if not filename:
             return
 
         full_show = AudioSegment.empty()
@@ -834,7 +924,8 @@ class AudioPlaylistApp(BaseTk):
 
             full_show = full_show + audio
 
-        full_show.export(fp, format="mp3")
+        full_show.export(filename, format="mp3")
+        tk.messagebox.showwarning(title="MP3 File Saved", message=f'Playlist saved as {filename}')
 
             
     def save_playlist(self):
@@ -1003,8 +1094,14 @@ class AudioPlaylistApp(BaseTk):
 
     def live_show_change(self):
         if self.live_show.get():
+            show_title = self.configuration.show_title
+            if len(show_title) == 0:
+                tk.messagebox.showwarning(title='Error',
+                                          message='You must set your show title using the Configuration menu in order to use this feature.')
+                return
+
             self.playlist.set_apikey()
-            if not self.playlist.get_show_playlist():
+            if not self.playlist.get_show_playlist(show_title):
                 tk.messagebox.showwarning(title="Error", message='Live playlist not found.')
                 self.live_show.set(False)
                 self.playlist.id = None
