@@ -152,10 +152,10 @@ def findTitleYouTube(artist, track):
 
 def get_spotify_token() -> Optional[str]:
     auth_url = 'https://accounts.spotify.com/api/token'
-    response = requests.post(auth_url, {
+    response = requests.post(auth_url, { # TODO: load from external file
         'grant_type': 'client_credentials',
-        'client_id': '87631abdb46c494788f2e1b8874a1d64',
-        'client_secret': '5718afa724cf4ef5b4befe95067da346'
+        'client_id': '', 
+        'client_secret': ''
     })
     if response.status_code != 200:
         print("no token")
