@@ -57,6 +57,7 @@ class TrackDownloader():
         out_file = '"{}/{}_%(title)s.%(ext)s"'.format(self.download_dir, artistTerm)
 
         cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, track_url)
+        self.is_done = False
         self.download_thread = CommandThread(cmd, self.on_fetch_done)
         self.download_thread.start()
 

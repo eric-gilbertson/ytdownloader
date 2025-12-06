@@ -7,7 +7,7 @@ import os, sys, subprocess, datetime, glob, pathlib
 # return time length in seconds of an mp3 file using ffmpeg or -1 if invalid.
 # assumes user has ffmpeg in PATH.
 def execute_ffmpeg_command(cmd):
-    cmd = "/usr/bin/ffmpeg -hide_banner " + cmd
+    cmd = "/usr/local/bin/ffmpeg -hide_banner " + cmd
     #print("Execute: {}".format(cmd))
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (output, err) = p.communicate()
@@ -20,7 +20,7 @@ def execute_ffmpeg_command(cmd):
 def get_gap_info(filePath):
     start_gap = end_gap = duration = 0
     #cmd = '/usr/local/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
-    cmd = '/usr/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
+    cmd = '/usr/local/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (output, err) = p.communicate()
     p_status = p.wait()
@@ -32,6 +32,9 @@ def get_gap_info(filePath):
         time_str = result[idx1:idx2].strip()
         time = datetime.datetime.strptime(time_str, '%H:%M:%S.%f')
         duration = time.second + time.minute * 60 + time.hour * 3600
+    else:
+        print(f"Error getting duration {filePath}, -{result}")
+        return -1, -1, -1
 
     silence_start_idx = result.find('silence_start: ') + 15
     have_end_gap = False
@@ -56,6 +59,9 @@ def get_gap_info(filePath):
 def trim_audio(srcFile):
     GAP_SECONDS = 1
     start_gap, end_gap, duration = get_gap_info(srcFile)
+    if duration < 0:
+        return False
+
     start_trim = max(start_gap - GAP_SECONDS, 0)
     end_trim = max(end_gap - GAP_SECONDS, 0)
     if start_trim > 0 or end_trim > 0:
@@ -65,11 +71,12 @@ def trim_audio(srcFile):
         cmd = ' -y -i "{}" -ss {} -to {} -c:a copy "{}"'.format(srcFile, start_trim, duration - end_trim, tmpFile)
         if execute_ffmpeg_command(cmd) != 0:
             print("trim error: {}".format(cmd))
-            return None
+            return False
         
         saveFile = os.path.dirname(srcFile) + srcpath.stem + ".trim" + srcpath.suffix
         os.rename(tmpFile, srcFile)
-        
+
+    return True
 
 
 if __name__ == '__main__':

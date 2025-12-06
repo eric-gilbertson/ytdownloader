@@ -6,23 +6,20 @@ are dragged, e.g. it assumes that the target tool creates its own copy of the fi
 are downloaded to ~/Music/ytdl. This program assumes that youtube-dl has been installed and
 included in the user's $PATH.
 '''
-import glob, subprocess, threading, time, os, datetime, re, shutil
-import urllib.parse
+import glob, threading, os, datetime, shutil
 from os.path import expanduser
-from shutil import which
-from pathlib import Path
 import tkinter as tk
 import tkinter.messagebox
-from tkinter import simpledialog
-import tkinter.font as tkFont
 import tkinter.ttk as ttk
+from tkinter import messagebox
 from tkinterdnd2 import *
 from audio_trimmer import trim_audio
 import pyaudio, wave
 
+from track_downloader import TrackDownloader
+
 YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
 STAGING_DIR = YTDL_DOWNLOAD_DIR + "/staging"
-YTDL_PATH = None
 
 # naming fixes:
 # Folk Alley Sessions: Anna Egge Girls..
@@ -58,7 +55,8 @@ class PlayerThread(threading.Thread):
                 stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
                                 channels=wf.getnchannels(),
                                 rate=wf.getframerate(),
-                                output=True)
+                                output=True,
+                                frames_per_buffer=4096)
     
                 # Play samples from the wave file (3)
                 while not self.stop and len(data := wf.readframes(1024)):
@@ -72,160 +70,11 @@ class PlayerThread(threading.Thread):
 
             self.is_playing = False
 
-# TODO
-# escape quotes in downloaded filename when invoking ffmpeg trim.
-# set input box red/green upon completion
-# remove '(Official Video)' and '(Lyric Video)' and single quotes from filename.
-class CommandThread(threading.Thread):
-    def __init__(self, cmd):
-        super(CommandThread, self).__init__()
-        self.cmd = cmd
-        self.process = None
-        self.stdout = None
-        self.stderr = None
-
-    def run(self):
-        self.process = subprocess.Popen(self.cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-        (self.stdout, self.stderr) = self.process.communicate()
-        pass
-
-def schedule_check(command_thread):
-    root.after(2000, check_if_done, command_thread)
-
-
-def clean_filepath(filepath):
-    FIELD_SEPARATOR='^'
-    new_name = os.path.basename(filepath)
-
-    if not (filepath.endswith('.wav') or filepath.endswith(".mp3")):
-        return filepath
-
-    # remove parenthetical and bracketed text
-    new_name = re.sub(r"[\(\[\{].*?[\)\]\}]", "", new_name)
-    new_name = re.sub(r'- \d+ -', FIELD_SEPARATOR, new_name)
-
-    # replace quoted song with seperator, e.g. John Craige "Judias"
-#    match = re.search(r"([^'\"]*)['\"]([^'\"]*)", new_name)
-#    if match and len(match.groups()) == 2:
-#        new_name = f"{match.group(1)} {FIELD_SEPARATOR} {match.group(2)}"
-
-    # replace quoted song with seperator, e.g. John Craige "Judias"
-    WIERD_QUOTE = '＂'
-    if new_name.find(WIERD_QUOTE) > 0:
-        new_name = new_name.replace(WIERD_QUOTE, FIELD_SEPARATOR, 1)
-        new_name = new_name.replace(WIERD_QUOTE, '', 1)
-
-    if new_name.find('Official Track') >= 0:
-        new_name = new_name.replace('Official Track', '')
-
-    if new_name.find('Official Lyric Video') >= 0:
-        new_name = new_name.replace('Official Lyric Video', '')
-
-    if new_name.find('Lyric Video') >= 0:
-        new_name = new_name.replace('Lyric Video', '')
-
-    if new_name.find('OFFICIAL MUSIC VIDEO') >= 0:
-        new_name = new_name.replace('OFFICIAL MUSIC VIDEO', '')
-
-    if new_name.find('NA_') >= 0:
-        new_name = new_name.replace('NA_', '')
-
-    if new_name.find('｜') >= 0:
-        new_name = new_name.replace('｜', FIELD_SEPARATOR)
-
-    if new_name.find(' : ') >= 0:
-        new_name = new_name.replace(' : ', FIELD_SEPARATOR)
-
-    if new_name.find('＂') >= 0:  # special fat double quote from &quot; in html
-        new_name = new_name.replace('＂', '')
-
-    if new_name.find('"') >= 0:  # regular double quote
-        new_name = new_name.replace('"', '')
-
-    if new_name.find('-') >= 0:
-        new_name = new_name.replace('-', FIELD_SEPARATOR)
-
-    if new_name.find('_') >= 0:
-        new_name = new_name.replace('_', ' ' + FIELD_SEPARATOR + ' ')
-
-    if new_name.find('–') >= 0:
-        new_name = new_name.replace('–', FIELD_SEPARATOR)
-
-    if new_name.find('Official HD Audio') >= 0:  # regular double quote
-        new_name = new_name.replace(' Official HD Audio', '')
-
-    if new_name.find('Official Music Video') >= 0:  # regular double quote
-        new_name = new_name.replace(' Official Music Video', '')
-
-    if new_name.find(f"{FIELD_SEPARATOR} {FIELD_SEPARATOR}") >= 0:
-        new_name = new_name.replace(f"{FIELD_SEPARATOR} {FIELD_SEPARATOR}", FIELD_SEPARATOR)
-
-    if new_name.find(f"{FIELD_SEPARATOR} .") >= 0:
-        new_name = new_name.replace(f"{FIELD_SEPARATOR} .", ".")
-
-    splitAr = new_name.split(FIELD_SEPARATOR)
-    if len(splitAr) != 2:
-        new_name  = simpledialog.askstring("File Name", "Track Name\t\t\t\t\t\t", initialvalue=f"{new_name}")
-    new_file = f"{os.path.dirname(filepath)}/{new_name}"
-
-    # trim secondary artist names, e.g. anything after a comma
-    nameAr = new_file.split(FIELD_SEPARATOR)
-    commaIdx = nameAr[0].find(',')
-    if commaIdx > 0 and len(nameAr) > 1:
-        new_file = f"{nameAr[0][0:commaIdx]} {FIELD_SEPARATOR} {nameAr[1]}"
-
-    if new_file != filepath:
-        logit("Rename: {}, {}".format(filepath, new_file))
-        os.rename(filepath, new_file)
-
-    Path(new_file).touch()
-    return new_file
-
-
-def check_if_done(command_thread):
-    if command_thread.process.returncode == None:
-        schedule_check(command_thread)
-    else:
-        root.bell()
-        errmsg = str(command_thread.stderr) # returns '\\\' even when there is no error.
-        if errmsg.find('File name too long') > 0:
-            tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name')
-            control_panel._fetch_url(False)
-            return
-
-        if command_thread.process.returncode == 0:
-            res = str(command_thread.stdout, 'utf-8')
-            idx1 = res.rfind("Destination: ") + 13
-            idx2 = res.find(".wav", idx1)
-            if idx1 > 13 and idx2 > idx1:
-                errmsg = ''
-                filepath =  res[idx1:idx2+4]
-                logit("Downloaded file: " + filepath)
-                filepath = clean_filepath(filepath)
-                trim_audio(filepath)
-
-                listbox.populate_list()
-                control_panel.url.delete(0, "end")
-                control_panel.url.config(cursor="")
-                #control_panel.url.config({"background": "Green"})
-                control_panel.url.update()
-
-        if len(errmsg) > 0:
-            control_panel.url.config(cursor="")
-            tk.messagebox.showwarning(title='Error', message=errmsg)
-            #control_panel.url.config({"background": "Red"})
-            #control_panel.url.update()
-
-
-def delete_file_after_delay(file_name):
-    if os.path.exists(file_name):
-        time.sleep(10)  # audacity needs time to process the file
-        #os.remove(file_name)
-
 class ControlPanel(object):
     def __init__(self, root):
         self.player = None
         self.list_widget = None
+        self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
 
         top_frame = tk.Frame(master=root, height=30)
         lbl = tk.Label(master=top_frame, text='URL:')
@@ -234,7 +83,7 @@ class ControlPanel(object):
         self.url = tk.Entry(master=top_frame, textvariable=self.urlEntry, width=39)
         self.url.bind('<Return>', self._on_url_enter)
         self.url.place(x=30, y=0)
-        button = tk.Button(master=top_frame, command= self._fetch_url, text="Fetch", width=5, fg="black", )
+        button = tk.Button(master=top_frame, command= self._fetch_url_start, text="Fetch", width=5, fg="black", )
         button.place(x=398, y=4)
         button = tk.Button(master=top_frame, command= self._reload, text="Reload", width=5, fg="black", )
         button.place(x=450, y=4)
@@ -247,7 +96,7 @@ class ControlPanel(object):
 
     def _on_url_enter(self, widget):
         #logit("enter: " + self.url.get())
-        self._fetch_url()
+        self._fetch_url_start()
 
     def set_list_widget(self, list_widget):
         self.list_widget = list_widget
@@ -256,7 +105,7 @@ class ControlPanel(object):
 
 
     def _reload(self):
-        self.list_widget.reload_list();
+        self.list_widget.reload_list()
 
     def _play_file(self):
         list = self.list_widget.tree.get_children()
@@ -266,19 +115,26 @@ class ControlPanel(object):
         if self.player:
             self.player.stop_player()
 
-        self.player = PlayerThread(idx, list)
-        self.player.start()
-
+        try:
+            self.player = PlayerThread(idx, list)
+            self.player.start()
+        except Exception as ioe:
+            tk.messagebox.showwarning(title='Error', message=f"Could not play file {ioe}")
 
     def double_click(self, event):
         item = self.list_widget.tree.focus()
         print("double: {}".format(item))
         self._play_file()
+
     def delete_click(self, event):
-        item = self.list_widget.tree.selection()[0]
-        print("delete: {}".format(item))
-        if os.path.exists(item):
-            os.remove(item)
+        if not messagebox.askyesno("Confirmation", "Are you sure you want to deleted the selected files?"):
+            return
+
+        for item in self.list_widget.tree.selection():
+            print("delete: {}".format(item))
+            if os.path.exists(item):
+                os.remove(item)
+
         self._reload()
 
 
@@ -287,24 +143,37 @@ class ControlPanel(object):
         print("stop play")
         self.player.stop_player()
 
-    def _fetch_url(self, useFullName=True):
-        #control_panel.url.config({"background": "White"})
-        #control_panel.url.update()
+    def _fetch_url_start(self, useFullName=True):
+        trackurl = self.urlEntry.get()
+        logit("load url: " + trackurl)
+        self.downloader.fetch_track(trackurl, useFullName)
+        control_panel.url.config(cursor="clock")
+        control_panel.url.update()
+        self._fetch_url_done(1)
 
-        if not YTDL_PATH:
-            tk.messagebox.showwarning('Error', "youtube-dl was not found. please check your installation.")
+    def _fetch_url_done(self, dummy):
+        if not self.downloader.is_done:
+            root.after(500, self._fetch_url_done, 1)
         else:
-            artistTerm = '%(artist)s' if useFullName else 'UNKNOWN'
-            logit("load url: " + self.urlEntry.get())
-            out_file = '"{}/{}_%(title)s.%(ext)s"'.format(YTDL_DOWNLOAD_DIR, artistTerm)
+            root.bell()
+            if self.downloader.name_too_long:
+                if tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
+                    self._fetch_url_start(False)
+            elif self.downloader.track.track_file:
+                control_panel.url.delete(0, "end")
+                control_panel.url.config(cursor="")
+                control_panel.url.update()
 
-            cmd = YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.urlEntry.get())
-            logit("cmd: " + cmd)
-            download_thread = CommandThread(cmd)
-            control_panel.url.config(cursor="clock")
-            control_panel.url.update()
-            download_thread.start()
-            schedule_check(download_thread)
+                new_track = self.downloader.track
+                if len(new_track.artist) == 0 or len(new_track.title) == 0:
+                    self.downloader.edit_track(root, new_track)
+
+                file_name = os.path.basename(new_track.track_file)
+                print(f"new file: {new_track.track_file}, {file_name}")
+                self.list_widget.tree.insert('', 'end', iid=new_track.track_file, text=file_name, values=(['x', file_name]))
+            else:
+                tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
+
 
 class FilePickerListbox(object):
     def __init__(self, frame):
@@ -446,7 +315,7 @@ class FilePickerListbox(object):
         container.grid_columnconfigure(0, weight=1)
         container.grid_rowconfigure(0, weight=1)
 
-        self.populate_list()
+        #self.populate_list()
 
     def reload_list(self):
         self.tree.delete(*self.tree.get_children())
@@ -470,7 +339,7 @@ class FilePickerListbox(object):
 
         mergeFiles = []
         for filepath in files:
-            filepath = clean_filepath(filepath)
+            (filepath, artist, title)  = TrackDownloader.clean_filepath(filepath)
             name = filepath[prefix_len: len(filepath)]
             mergeFiles.append([name, filepath])
 
@@ -495,17 +364,14 @@ class FilePickerListbox(object):
 
 
 
-def resize(event):
-    logit("height: ", event.height, "width: ", event.width)
-
 def create_app(root):
-    global YTDL_PATH, control_panel, listbox
+    global control_panel, listbox
 
-    YTDL_PATH = shutil.which('yt-dlp')
+    if not shutil.which('yt-dlp'):
+        tk.messagebox.showwarning('Error', "yt-dlp not found. Please check your installation.")
+
     if not os.path.exists(YTDL_DOWNLOAD_DIR):
         os.makedirs(YTDL_DOWNLOAD_DIR)
-
-    logit("ytdl path: {}".format(YTDL_PATH))
 
     if not root:
         root = TkinterDnD.Tk()
@@ -519,9 +385,13 @@ def create_app(root):
     list_frame.pack(fill=tk.X)
     listbox = FilePickerListbox(list_frame)
     control_panel.set_list_widget(listbox)
+    listbox.populate_list()
     return root
 
 if __name__ == '__main__':
+    global root
     root = create_app(None)
     root.mainloop()
+
+
 

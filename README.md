@@ -38,3 +38,23 @@ to your computer and listed in the tool's file list. From the file list the trac
 dragged into a recording tool such as Audacity. Note that the track file will be deleted 
 approximately 10 seconds after the Drag and Drop operation is completed.
 
+Installing yt-dlp:
+Yt-dlp can be installed using on Macs using either the Homebrew (aka brew)  or Macport (aka port) 
+software installation tools which can then be used to install yt-dlp. The steps for doing this using
+Macport are as follows:
+
+       * identify your MacOs version by opening About This Mac (from top left)
+       * goto  https://www.macports.org/install.php 
+       * click the link for your MacOs version - initiates installation package download
+       * double click in the downloaded image and follow directions
+       * enter sudo port install yt-dlp and follow directions (this takes about 1 hour to complete)
+
+To install using Homebrew do the following:
+       * open a terminal by clicking: Finder > Applications > Utilities > Terminal.
+       * enter 'brew install yt-dlp (this takes about 1 hour to complete)
+       *
+       
+
+TODO:
+create ~/Music/ytdl if not exist
+don't translate '-' that are part of file path, e.g. kzsu-archiver

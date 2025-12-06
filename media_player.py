@@ -15,7 +15,9 @@ VLC like media player optimized for use in live radio features include:
 - Output device selection (first entry tries to be internal speakers)
 - Save/Load .m3u playlists (ignores non .wav/.mp3 lines)
 """
+import glob
 import pathlib
+from multiprocessing.process import parent_process
 from os.path import expanduser
 
 from m3uToPlaylist import getTitlesYouTube
@@ -32,6 +34,10 @@ from track_downloader import TrackDownloader
 
 # download directory to the staging dir
 YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl/staging"
+ZOOKEEPER_TIMEOUT_SECONDS = 5
+
+PAUSE_FILE = 'PAUSE'
+MIC_BREAK_FILE = 'MIC_BREAK'
 
 # ---------- Optional DnD (Finder drag/drop) ----------
 try:
@@ -50,13 +56,13 @@ def logit(msg):
 
 
 def is_stop_file(file_name):
-    return file_name == 'pause' or file_name == 'break'
+    return file_name == PAUSE_FILE or file_name == MIC_BREAK_FILE
 
-def is_break_file(file_name):
-    return file_name == 'break'
+def is_mic_break_file(file_name):
+    return file_name == MIC_BREAK_FILE
 
 def is_pause_file(file_name):
-    return file_name == 'pause'
+    return file_name == PAUSE_FILE
 
 def HMS_from_seconds(seconds):
     minutes, secs = divmod(seconds, 60)
@@ -76,17 +82,17 @@ def seconds_from_HMS(time_hms):
 
 
 class SelectAlbumDialog(simpledialog.Dialog):
-    def __init__(self, parent, artist="", track=""):
+    def __init__(self, parent, artist, track, album_choices):
         # store initial values
         self.artist = artist
         self.track = track
+        self.album_choices = album_choices
         self.album = ''
-        self.album_choices = []
+        self.album_choices = album_choices
         self.ok_clicked = False
         super().__init__(parent, f'Select Album')
 
     def body(self, master):
-
         self.choices_entry = tk.Text(master, borderwidth=1, relief="solid", width=80)
         self.choices_entry.bind("<Double-1>", lambda e: self._select_row(e))
         self.choices_entry.config(cursor="arrow")
@@ -94,7 +100,6 @@ class SelectAlbumDialog(simpledialog.Dialog):
         self.choice_entry = tk.Entry(master, width=60)
         self.track_info = tk.Entry(master, width=60)
 
-        self.album_choices = getTitlesYouTube(self.artist, self.track)
         idx = 0
         albums = ''
         for title in self.album_choices:
@@ -104,9 +109,11 @@ class SelectAlbumDialog(simpledialog.Dialog):
         self.choices_entry.insert("1.0", albums)
         self.track_info.insert(0, f'{self.artist} - {self.track}')
 
-        if idx == 1:
+        if idx > 0:
             self.choice_entry.insert(0, '0')
 
+        self.choice_entry.focus_set()
+ 
         # Place widgets
         self.track_info.grid(row=1, column=0, padx=0, pady=5)
         self.choices_entry.grid(row=2, column=0, padx=0, pady=5)
@@ -142,11 +149,15 @@ class UserConfiguration():
 
     def __init__(self, config_dict):
         self.show_title = config_dict.get('show_title', '')
+        self.show_start_time = config_dict.get('show_start_time', '')
+        self.display_track_start_time = config_dict.get('display_track_start_time', False)
 
     
     def to_dict(self):
         dict = {
             'show_title' : self.show_title,
+            'show_start_time' : self.show_start_time,
+            'display_track_start_time' : self.display_track_start_time
         }
         return dict
 
@@ -177,12 +188,87 @@ class UserConfiguration():
 
 
 
+class LiveShowDialog(simpledialog.Dialog):
+    def __init__(self, parent, show_title, show_start):
+        self.parent = parent
+        self.show_title = show_title
+        self.show_start = show_start
+        self.show_title_entry = None
+        self.show_start_combo = None
+        self.ok_clicked = False
+        super().__init__(parent, "Live Show Info")
+
+    def body(self, master):
+        info_msg = "Enter the name and start time of your Zookeeper playlist. Note that you must manually create the playlist yourself using the Zookeeper prior to the start of your program."
+
+        tk.Label(master, text=info_msg, wraplength=450, justify=tk.LEFT).grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
+
+        tk.Label(master, text="Show Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        self.show_title_entry = tk.Entry(master, width=40)
+        self.show_title_entry.insert(0, self.show_title)
+        self.show_title_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        tk.Label(master, text="Show Start:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
+        self.show_start_combo = ttk.Combobox(master, state="readonly", width=15)
+        self.show_start_combo.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+        self.show_start_combo.bind("<<ComboboxSelected>>", self.on_showstart_change)
+
+        now_hour = datetime.datetime.now().hour
+        time_values = ["NOW"]
+        for i in range(now_hour+1, 24):
+            hour = i - 12 if i > 12 else i
+            suffix = ' am' if i < 12 else ' pm'
+            time_values.append(f"{hour} {suffix}")
+
+        self.show_start_combo['values'] = time_values
+        return self.show_title_entry  # focus on artist field by default
+
+    def on_showstart_change(self, event):
+        newval = self.show_start_combo.get()
+        print(f"show start change: {newval}")
+        newstate = tk.DISABLED if len(newval) == 0 else tk.NORMAL
+        self.ok_button.config(state=newstate)
+
+    def buttonbox(self):
+        box = tk.Frame(self)
+        self.ok_button = tk.Button(box, text="OK", width=10, command=self.ok, state=tk.DISABLED)
+        self.ok_button.pack(side=tk.LEFT, padx=5, pady=5)
+        cancel_button = tk.Button(box, text="Cancel", width=10, command=self.cancel)
+        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
+        box.pack()
+
+    def apply(self):
+        # When Save is clicked
+        delta_seconds = 5
+        show_title = self.show_title_entry.get()
+        start_time_str = self.show_start_combo.get()
+        if start_time_str != "NOW":
+            show_start_ar = start_time_str.split(' ')
+            is_am = show_start_ar[1].strip() == 'am'
+            start_hour = int(show_start_ar[0])
+            if start_hour == 12 and is_am:
+                start_hour = 0
+            elif not is_am and start_hour != 12:
+                start_hour = start_hour + 12
+       
+            print(f"start_hour: {start_hour}")
+            now = datetime.datetime.now()
+            show_start = now.replace(hour=start_hour, minute=0, second=0)
+            delta_seconds = (show_start - now).total_seconds() + 5
+            print(f"delta: {delta_seconds}, {delta_seconds / 3600}, {delta_seconds / 60}")
+
+        self.parent.after(delta_seconds * 1024, self.parent.playlist.check_show_playlist, show_title)
+
 class UserConfigurationDialog(simpledialog.Dialog):
     def __init__(self, parent, user_configuration):
 
         # store initial values
         self.configuration = user_configuration
         self.show_title_entry = None
+        self.show_start_combo = None
+        self.display_track_start_time_cbox = None
+        self.display_track_start_time = tk.IntVar()
+        self.display_track_start_time.set(1 if user_configuration.display_track_start_time else  0)
         self.ok_clicked = False
         super().__init__(parent, "Configuration")
 
@@ -192,12 +278,40 @@ class UserConfigurationDialog(simpledialog.Dialog):
         self.show_title_entry.insert(0, self.configuration.show_title)
         self.show_title_entry.grid(row=0, column=1, padx=5, pady=5)
 
+        tk.Label(master, text="Show Start:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        self.show_start_combo = ttk.Combobox(master, state="readonly", width=15)
+        self.show_start_combo.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+        time_values = [
+            '12 am', '1 am', '2 am', '3 am', '4 am', '5 am', '6 am', '7 am', '8 am', '9 am', '10 am', '11 am',
+            '12 pm', '1 pm', '2 pm', '3 pm', '4 pm', '5 pm', '6 pm', '7 pm', '8 pm', '9 pm', '10 pm', '11 pm',
+        ]
+
+        self.show_start_combo['values'] = time_values
+        self.show_start_combo.set(time_values[self.configuration.show_start_time])
+
+        self.display_track_start_time_cbox = ttk.Checkbutton(master, text="Display Track Start Times", onvalue=1, offvalue=0, variable=self.display_track_start_time)
+        self.display_track_start_time_cbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+
+        
         return self.show_title_entry  # focus on artist field by default
 
     def apply(self):
         # When Save is clicked
         self.ok_clicked = True
         self.configuration.show_title = self.show_title_entry.get()
+        self.configuration.display_track_start_time = self.display_track_start_time.get() == 1
+
+        start_hour = ''
+        show_start_ar = self.show_start_combo.get().split(' ')
+        if len(show_start_ar) == 2:
+            is_am = show_start_ar[1].strip() == 'am'
+            start_hour = int(show_start_ar[0])
+            if start_hour == 12 and is_am:
+                start_hour = 0
+            elif not is_am and start_hour != 12:
+                start_hour = start_hour + 12
+
+        self.configuration.show_start_time = start_hour
         self.configuration.save_config()
 
 class TrackEditDialog(simpledialog.Dialog):
@@ -263,9 +377,10 @@ class Track():
 
 
 class Playlist():
-    def __init__(self):
+    def __init__(self, parent):
         super().__init__()
 
+        self.parent = parent
         self.track_idx = 0
         self.set_apikey()
         self.id = None
@@ -295,12 +410,14 @@ class Playlist():
 
     
     def send_track(self, track):
+        logit("enter send_track")
         if not self.id or is_pause_file(track.title) or track.title.startswith("LID_"):
+            logit(f"abort send_track {self.id}")
             return
 
         url = self.API_URL + f'/api/v2/playlist/{self.id}/events'
         method = "POST" # timestamp this track
-        event_type = 'break' if is_break_file(track.title) else 'spin'
+        event_type = 'break' if is_mic_break_file(track.title) else 'spin'
         event =  {
             "type": "event",
             "attributes": {
@@ -321,36 +438,35 @@ class Playlist():
         req.add_header("X-APIKEY", self.API_KEY)
         
         try:
-            with urllib.request.urlopen(req, data=data_json.encode('utf-8'), timeout=2, context=self.ssl_context) as response:
+            with urllib.request.urlopen(req, data=data_json.encode('utf-8'), timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
                 resp_obj  = json.loads(response.read())
         except Exception as e:
             logit(f"Exception posting track: {url}, {e}")
 
-    def get_show_playlist(self, show_title):
+        logit("exit send_track")
+
+    def check_show_playlist(self, show_title):
+        have_playlist = False
         self.id = None
-
         url = self.API_URL + '/api/v2/playlist?filter[date]=onNow'
-        resp_data = []
+
         try:
-            with urllib.request.urlopen(url, timeout=2, context=self.ssl_context) as response:
+            with urllib.request.urlopen(url, timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
                 resp_obj  = json.loads(response.read())
-                resp_data = resp_obj['data']
+                playlist = resp_obj['data'][0]
+                attrs = playlist['attributes']
+                show_name = attrs['name']
+                have_playlist = show_name.lower() == show_title.lower()
+                if have_playlist:
+                    self.id = playlist['id']
         except Exception as e:
-                logit(f"Exception getting playlist: {url}, {e})")
+            logit(f"Exception getting playlist: {url}, {e})")
 
-        if len(resp_data) == 0:
-            logit(f"Playlist not available: {url}")
-            return False
-
-        playlist = resp_obj['data'][0]
-        attrs = playlist['attributes']
-        show_name = attrs['name']
-        if show_name.lower() != show_title.lower():
-            logit(f"Playlist not active: {show_name}")
-            return False
-
-        self.id = playlist['id']
-        return True
+        if not have_playlist:
+            self.parent.live_show.set(False)
+            tk.messagebox.showwarning(title="Error", message=f'Zookeeper playlist not found.')
+          
+        return have_playlist
 
 
 class AudioPlaylistApp(BaseTk):
@@ -366,6 +482,7 @@ class AudioPlaylistApp(BaseTk):
 
         self.app_title = ''
         self._set_title("Playlist Player")
+        self.playlist_file = ''
 
         # ----- State -----
         self._stop_playback = threading.Event()
@@ -375,7 +492,7 @@ class AudioPlaylistApp(BaseTk):
         self._audio_total_ms = 0
         self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
-        self.playlist = Playlist()
+        self.playlist = Playlist(self)
         self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
         self.configuration = UserConfiguration.load_config()
 
@@ -416,21 +533,27 @@ class AudioPlaylistApp(BaseTk):
             self.downloader.fetch_track(trackurl, useFullName)
             self.url.config(cursor="clock")
             self.url.update()
-                
-    def _fetch_track_done(self):
-        self.bell()
-        if self.downloader.name_too_long:
-            if tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
-                self.downloader.fetch_track(False)
-        elif self.downloader.track_file:
-            self.url.delete(0, "end")
-            self.url.config(cursor="")
-            self.url.update()
+            self._fetch_track_done(1)
 
-            #append track to current list
-            self._insert_track(-1, self.downloader.artist, self.downloader.title, self.downloader.track_file, True)
+                
+    def _fetch_track_done(self, dummy):
+        if not self.downloader.is_done:
+            self.after(500, self._fetch_track_done, 1)
         else:
-            tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
+            self.bell()
+            if self.downloader.name_too_long:
+                if tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
+                    self.downloader.fetch_track(False)
+            elif self.downloader.track.track_file:
+                self.url.delete(0, "end")
+                self.url.config(cursor="")
+                self.url.update()
+    
+                #append track to current list
+                self._insert_track(-1, self.downloader.track.artist, self.downloader.track.title, self.downloader.track.track_file, True)
+            else:
+                tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
+
                 
     def _edit_configuration(self):
         print("edit configuration")
@@ -447,13 +570,17 @@ class AudioPlaylistApp(BaseTk):
     def _build_menubar(self):
         menubar = tk.Menu(self)
         filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="Configure", command=self._edit_configuration)
-        filemenu.add_command(label="Load Playlist", command=self.load_playlist)
-        filemenu.add_command(label="Save Playlist", command=self.save_playlist)
+        filemenu.add_command(label="Configure...", command=self._edit_configuration)
+        filemenu.add_command(label="Load Playlist...", command=self.load_playlist)
+        filemenu.add_command(label="Save Playlist...", command=self.save_playlist)
+        filemenu.add_command(label="Update Playlist", command=self.update_playlist)
+        filemenu.add_command(label="Import Audio...", command=self.import_audio_files)
         menubar.add_cascade(label="File", menu=filemenu)
 
         editmenu = tk.Menu(menubar, tearoff=0)
         editmenu.add_command(label="Edit Track (Shift-Click)", command=self.edit_selected_track)
+        editmenu.add_command(label="Insert Pause", command=self.insert_pause)
+        editmenu.add_command(label="Insert Mic-Break", command=self.insert_mic_break)
         menubar.add_cascade(label="Edit", menu=editmenu)
 
         self.config(menu=menubar)
@@ -466,7 +593,7 @@ class AudioPlaylistApp(BaseTk):
         tk.Button(top, text="▶", width=3, command=self.play_selected).pack(side="left", padx=(0, 12), pady=2)
         tk.Button(top, text="Save", command=self.save_playlist).pack(side="left", padx=(0, 6), pady=2)
         tk.Button(top, text="Load", command=self.load_playlist).pack(side="left", padx=(0, 12), pady=2)
-        tk.Button(top, text="Fill Albums", command=self.fill_albums).pack(side="left", padx=(0, 12), pady=2)
+        tk.Button(top, text="Find Albums", command=self.find_albums).pack(side="left", padx=(0, 12), pady=2)
         tk.Button(top, text="MP3", command=self.save_mp3).pack(side="left", padx=(0, 6), pady=2)
 
         tk.Checkbutton(top, text="Live", command=self.live_show_change, variable=self.live_show).pack(side="left", padx=(0, 12), pady=2)
@@ -608,6 +735,25 @@ class AudioPlaylistApp(BaseTk):
         return None
 
     # ======================= TREEVIEW HELPERS =======================
+    def _get_selected_index(self):
+        selection_index = -1
+        selected_items = self.tree.selection()  # Get IDs of selected rows
+        if selected_items:
+            selection_index = self.tree.index(selected_items[0])
+    
+        return selection_index
+
+    def insert_pause(self):
+        print("insert pause")
+        insert_index = self._get_selected_index()
+        self._insert_track(insert_index, '', PAUSE_FILE, PAUSE_FILE, True)
+
+    def insert_mic_break(self):
+        print("insert mic_break")
+        insert_index = self._get_selected_index()
+        self._insert_track(insert_index, '', MIC_BREAK_FILE, MIC_BREAK_FILE, True)
+
+
     def edit_selected_track(self):
         selected_items = self.tree.selection()  # Get IDs of selected rows
         if not selected_items:
@@ -830,30 +976,35 @@ class AudioPlaylistApp(BaseTk):
                 tk.messagebox.showwarning(title="Error", message=f'Ignoring invalid file:" {path}')
                 continue
 
-            artist = ''
-            title = os.path.basename(path[0:-4])
-            titleAr = title.split('^')
-            if len(titleAr) > 1:
-                artist = titleAr[0].strip()
-                title = titleAr[1].strip()
-
+            (artist, title) = self._get_track_info(path)
             self._insert_track(insert_index, artist, title, path, file_count == 0)
-
             insert_index += 1  # subsequent files go after
             file_count = file_count - 1
 
         self._hide_insert_line()
+
+    def _get_track_info(self, file_path):
+        artist = ''
+        title = os.path.basename(file_path[0:-4])
+        titleAr = title.split('^')
+        if len(titleAr) > 1:
+            artist = titleAr[0].strip()
+            title = titleAr[1].strip()
+
+        return (artist, title)
+
 
     def _insert_track(self, insert_index, artist, title, path, update_list):
         if insert_index == -1:
             insert_index = len(self.tree.get_children(""))
 
         tags = ()
-        if is_break_file(title):
+        if is_mic_break_file(title):
             tags = ("break")
         elif is_pause_file(title):
             tags = ("pause")
 
+        print(f"title: {title}")
         duration = 0 if is_stop_file(title) else len(AudioSegment.from_file(path))/1000
         id = self.tree.insert("", insert_index, values=(insert_index+1, "-1", artist, title, ""), tags=tags)
         track = Track(id, artist, title, '', path, duration)
@@ -894,9 +1045,9 @@ class AudioPlaylistApp(BaseTk):
         return is_spot
 
     @staticmethod
-    def _is_break_file(file_name):
-        is_break = re.match('audio[0-9]+\.', file_name)
-        return is_break
+    def _is_audio_file(file_name):
+        is_audio = re.match('audio[0-9]+\.', file_name)
+        return is_audio
 
     # ======================= PLAYLIST SAVE/LOAD =======================
     def save_mp3(self):
@@ -915,6 +1066,7 @@ class AudioPlaylistApp(BaseTk):
         full_show = AudioSegment.empty()
         for item in self.tree.get_children(""):
             track = self.tree_datamap[item]
+            logit(f"mp3 export: {track.title}")
             if track.file_path.endswith('.mp3'):
                 audio = AudioSegment.from_mp3(track.file_path)
             elif track.file_path.endswith('.wav'):
@@ -924,36 +1076,63 @@ class AudioPlaylistApp(BaseTk):
 
             full_show = full_show + audio
 
+        logit(f"export {filename}")
         full_show.export(filename, format="mp3")
         tk.messagebox.showwarning(title="MP3 File Saved", message=f'Playlist saved as {filename}')
 
             
-    def save_playlist(self):
-        START_HOURS=14
+    # import audio files from a directory.
+    def import_audio_files(self):
+        home_dir = expanduser("~")
+        dir_path = filedialog.askdirectory( title="Add wav/mp3 files from directory",
+            initialdir=home_dir)
 
+        if not dir_path:
+            return
+
+        audio_files = glob.glob(dir_path + "/*.mp3") + glob.glob(dir_path + "/*.wav")
+        for idx, file_path in enumerate(audio_files):
+            (artist, title) = self._get_track_info(file_path)
+            self._insert_track(-1, artist, title, file_path, False)
+
+        self._renumber_rows()
+
+    def update_playlist(self):
+        if os.path.exists(self.playlist_file):
+            self.do_playlist_save(self.playlist_file)
+        else:
+            self.save_playlist()
+
+    def save_playlist(self):
+        fp = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV", "*.csv")],
+                title="Save Playlist As")
+
+        if fp:
+            self.do_playlist_save(fp)
+
+    def do_playlist_save(self, fp):
         if not self.tree.get_children(""):
             logit("[Save] No files to save.")
             return
-        fp = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV", "*.csv")],
-            title="Save Playlist As"
-        )
+
         if not fp:
             return
 
+        self.playlist_file = fp
         try:
             zk_tag = zk_label  = '-'
             zk_filename = f'{fp[0:-4]}_zk.csv'
             zk_file = open(zk_filename, "w", encoding="utf-8")
  
-            time_secs = START_HOURS*60*60 # 2pm in seconds
+            time_secs = 0
             with open(fp, "w", encoding="utf-8") as f:
                 include_timestamps = False
                 for item in self.tree.get_children(""):
                     t = self.tree_datamap[item]
                     file_name = os.path.basename(t.file_path).lower()
-                    if self._is_break_file(file_name):
+                    if self._is_audio_file(file_name):
                         include_timestamps = True
                         break
              
@@ -967,9 +1146,9 @@ class AudioPlaylistApp(BaseTk):
                     f.write(line)
 
                     if include_timestamps:
-                        zk_track_start = '\t{track_start}\n'
+                        zk_track_start = f'{track_start}\n'
 
-                    if self._is_break_file(file_name):
+                    if self._is_audio_file(file_name):
                         # zookeeper needs all blanks for a break
                         zk_line = f"\t\t\t\t\t{zk_track_start}"
                     else:
@@ -1009,6 +1188,8 @@ class AudioPlaylistApp(BaseTk):
         else:
             self.import_csv(fp)
 
+        self.playlist_file = fp
+
     # imports files using Zookeeper form:
     # artist  track  album  tag   label  timestamp	file
     def import_csv(self, fp):
@@ -1020,21 +1201,29 @@ class AudioPlaylistApp(BaseTk):
             logit(f'File does not exist {fp}')
             return
 
+        start_hour = self.configuration.show_start_time
+        if start_hour >= 0:
+            total_secs = start_hour * 60 * 60
+
         with open(fp, "r", encoding="utf-8") as f:
             idx = 1
             for line in f:
                 lineAr = line.strip().split('\t')
-                if len(lineAr) < 4 or not os.path.exists(lineAr[FILE_IDX]):
-                    logit(f"skipping: {len(lineAr)}, {line}")
+                if (len(lineAr) < 4) or (not is_stop_file(lineAr[FILE_IDX]) and not os.path.exists(lineAr[FILE_IDX])):
+                    logit(f"skipping file: {len(lineAr)}, {line}")
                     continue
 
+                seconds = -1
                 artist = lineAr[0]
                 title = lineAr[1]
                 album = lineAr[2]
                 file = lineAr[FILE_IDX]
-
                 file_name = os.path.basename(file)
-                seconds = 0 if is_stop_file(file_name) else len(AudioSegment.from_file(file))//1000
+                if len(lineAr) > FILE_IDX + 1:
+                    seconds = int(lineAr[FILE_IDX+1])
+                else:
+                    seconds = 0 if is_stop_file(file_name) else len(AudioSegment.from_file(file))//1000
+
                 track_start = HMS_from_seconds(total_secs)
                 track_duration = HMS_from_seconds(seconds)
                 track = Track(-1, artist, title, album, file, seconds)
@@ -1070,7 +1259,10 @@ class AudioPlaylistApp(BaseTk):
                             seconds = 0 if is_stop_file(title) else len(AudioSegment.from_file(line))/1000
                             track_start = HMS_from_seconds(total_secs)
                             track_duration = HMS_from_seconds(seconds)
-                            self.tree.insert("", "end", values=(idx, track_start, artist, title, ""))
+                            track = Track(-1, artist, title, '', line, seconds)
+                            id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album))
+                            track.id = id
+                            self.tree_datamap[id] = track
                             infoAr = []
                             total_secs = total_secs + seconds
 
@@ -1095,16 +1287,7 @@ class AudioPlaylistApp(BaseTk):
     def live_show_change(self):
         if self.live_show.get():
             show_title = self.configuration.show_title
-            if len(show_title) == 0:
-                tk.messagebox.showwarning(title='Error',
-                                          message='You must set your show title using the Configuration menu in order to use this feature.')
-                return
-
-            self.playlist.set_apikey()
-            if not self.playlist.get_show_playlist(show_title):
-                tk.messagebox.showwarning(title="Error", message='Live playlist not found.')
-                self.live_show.set(False)
-                self.playlist.id = None
+            LiveShowDialog(self, show_title, "12 am")
         else:
             self.playlist.id = None
 
@@ -1126,21 +1309,26 @@ class AudioPlaylistApp(BaseTk):
         self.clipboard_append(final_clipboard_string) # Add new content
     
 
-    def fill_albums(self):
+    def find_albums(self):
         items = self.tree.get_children("")
         for item in items:
             track = self.tree_datamap[item]
-            if len(track.album) > 1 or self._is_spot_file(track.title):
+            if len(track.album) > 1 or self._is_spot_file(track.title) or is_stop_file(track.title):
                 continue
 
-            dialog = SelectAlbumDialog(self,  artist=track.artist, track=track.title)
-            if dialog.ok_clicked:
-                track.album = dialog.album
-                row_values = self.tree.item(track.id)["values"]
-                row_values = (*row_values[0:2], track.artist, track.title, track.album)
-                self.tree.item(track.id, values=row_values)
+            album_choices = getTitlesYouTube(track.artist, track.title)
+            if len(album_choices) == 1:
+                track.album = album_choices[0]
             else:
-                break
+                dialog = SelectAlbumDialog(self,  track.artist, track.title, album_choices)
+                if dialog.ok_clicked:
+                    track.album = dialog.album
+                else:
+                    break
+
+            row_values = self.tree.item(track.id)["values"]
+            row_values = (*row_values[0:2], track.artist, track.title, track.album)
+            self.tree.item(track.id, values=row_values)
 
 
     def play_selected(self):
@@ -1168,7 +1356,7 @@ class AudioPlaylistApp(BaseTk):
         if is_stop_file(track.title):
             self._paused = True
             self._set_countdown("")
-            if is_break_file(track.title):
+            if is_mic_break_file(track.title):
                 self.playlist.send_track(track)
 
             return
@@ -1198,9 +1386,8 @@ class AudioPlaylistApp(BaseTk):
         try:
             kwargs = dict(
                 format=pa.get_format_from_width(audio_segment.sample_width),
-                channels=audio_segment.channels,
-                rate=audio_segment.frame_rate,
-                output=True,
+                channels=audio_segment.channels, rate=audio_segment.frame_rate,
+                frames_per_buffer=4096, output=True,
             )
             dev_index = self._get_selected_device_index()
             if dev_index is not None:
@@ -1229,6 +1416,7 @@ class AudioPlaylistApp(BaseTk):
                 pass
 
             # Natural end -> play next (unless stopped)
+            print("check play next")
             if not self._stop_playback.is_set():
                 self.after(120, self._play_next_track)
             else:
@@ -1237,10 +1425,13 @@ class AudioPlaylistApp(BaseTk):
 
     def stop_audio(self):
         if self._play_thread and self._play_thread.is_alive():
+            print("set stop_playback")
             self._stop_playback.set()
             self._play_thread.join(timeout=0.3)
+
         self._play_thread = None
-        self._stop_playback.clear()
+        print("clear stop_playback")
+        #self._stop_playback.clear()
         self._audio_pos_ms = 0
         self._set_countdown("")
         self._refresh_output_devices() # pick up any new devices
@@ -1288,6 +1479,5 @@ class AudioPlaylistApp(BaseTk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
-    app.load_playlist("/Users/barbara/Documents/boneyard.csv")
     app.mainloop()
 
