@@ -4,6 +4,8 @@ import threading, subprocess, shutil, re, os
 from pathlib import Path
 from tkinter import simpledialog
 import tkinter as tk
+from m3uToPlaylist import getTracksYouTube
+from tkinter import messagebox
 
 
 from audio_trimmer import trim_audio
@@ -45,6 +47,7 @@ class TrackDownloader():
         self.name_too_long = False
         self.err_msg = ''
         self.track = Track('', '', '', '', '', 0)
+        self.track_url = ''
         self.track_file = None
         self.is_done = False
 
@@ -52,14 +55,39 @@ class TrackDownloader():
             os.makedirs(download_dir)
 
 
-    def fetch_track(self, track_url, use_fullname):
+    def fetch_track(self, parent, track_specifier, use_fullname):
+        ARTIST_TRACK_SEPARATOR = ';'
         artistTerm = '%(artist)s' if use_fullname  else 'UNKNOWN'
         out_file = '"{}/{}_%(title)s.%(ext)s"'.format(self.download_dir, artistTerm)
 
-        cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, track_url)
+        track_specifier_ar = track_specifier.split(ARTIST_TRACK_SEPARATOR)
+        # use_fullname is false when the first try fails because the artist name was too long
+        # for the filename. if a second try then skip the track lookup and use the previous URL.
+        if use_fullname  and len(track_specifier_ar) == 2:
+            artist = track_specifier_ar[0]
+            title = track_specifier_ar[1]
+            tracks = getTracksYouTube(artist, title)
+            if len(tracks) == 0:
+                tk.messagebox.showwarning(title="Error", message=f"Nothing found for -{title}- by -{artist}-")
+                return False
+            else:
+                dialog = SelectTrackDialog(parent, artist, title, tracks)
+                if not dialog.ok_clicked or len(dialog.track_id) == 0:
+                    return False
+
+                self.track_url = f"https://youtube.com/watch?v={dialog.track_id}"
+        elif use_fullname:
+            self.track_url = track_specifier
+
+        if not "youtube.com" in self.track_url:
+            tk.messagebox.showwarning(title="Error", message=f"Invalid request entry. Use either a Youtube video URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME>;<SONG_TITLE>")
+            return False
+
+        cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.track_url)
         self.is_done = False
         self.download_thread = CommandThread(cmd, self.on_fetch_done)
         self.download_thread.start()
+        return True
 
     def on_fetch_done(self):
         self.err_msg = str(self.download_thread.stderr)
@@ -188,6 +216,64 @@ class TrackDownloader():
             print("Canceled or no input provided.")
             return False
 
+
+class SelectTrackDialog(simpledialog.Dialog):
+    def __init__(self, parent, artist, track_title, track_choices):
+        # store initial values
+        self.artist = artist
+        self.track_title = track_title
+        self.album = ''
+        self.track_choices = track_choices
+        self.track_id = ''
+        self.ok_clicked = False
+        super().__init__(parent, title='Select Song')
+
+    def body(self, master):
+        self.choices_entry = tk.Text(master, borderwidth=1, relief="solid", width=80)
+        self.choices_entry.bind("<Double-1>", lambda e: self._select_row(e))
+        self.choices_entry.config(cursor="arrow")
+
+        self.choice_entry = tk.Entry(master, width=60)
+        self.track_info = tk.Entry(master, width=60)
+
+        idx = 1
+        tracks = ''
+        for track in self.track_choices:
+            tracks = tracks + f"{idx}: {track['duration']} {track['title']} - {track['artists'][0]['name']} - {track['album']['name']}\n"
+            idx = idx + 1
+
+        self.choices_entry.insert("1.0", tracks)
+        self.track_info.insert(0, f'{self.artist} - {self.track_title}')
+
+        self.choice_entry.focus_set()
+ 
+        # Place widgets
+        self.track_info.grid(row=1, column=0, padx=0, pady=5)
+        self.choices_entry.grid(row=2, column=0, padx=0, pady=5)
+        self.choice_entry.grid(row=3, column=0, padx=5, pady=5)
+
+    def apply(self):
+        # When Save is clicked
+        self.ok_clicked = True
+
+        choice = self.choice_entry.get()
+        if len(choice) == 0:
+            self.ok_clicked = False
+        elif len(choice) == 1:
+            choice_num = int(choice)
+            self.track_id = self.track_choices[choice_num]['album']['videoId']
+
+    def _select_row(self, event):
+        index = self.choices_entry.index(f"@{event.x},{event.y}")
+        line_number = int(index.split('.')[0]) - 1
+        if line_number >= len(self.track_choices):
+            return
+
+        self.ok_clicked = True
+        self.track_id = self.track_choices[line_number]['videoId']
+        self.album = self.track_choices[line_number]['album']['name']
+        self.destroy()
+    
 class TrackEditDialog(simpledialog.Dialog):
     def __init__(self, parent, hdr_title=None, track_artist="", track_title="", track_album=""):
 

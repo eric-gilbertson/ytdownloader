@@ -19,6 +19,7 @@ import glob
 import pathlib
 from multiprocessing.process import parent_process
 from os.path import expanduser
+import time
 
 from m3uToPlaylist import getTitlesYouTube
 import json, re, datetime, yaml
@@ -149,15 +150,14 @@ class UserConfiguration():
 
     def __init__(self, config_dict):
         self.show_title = config_dict.get('show_title', '')
-        self.show_start_time = config_dict.get('show_start_time', '')
-        self.display_track_start_time = config_dict.get('display_track_start_time', False)
+        self.show_start_time = config_dict.get('show_start_time', 0)
+        self.zookeeper_url = config_dict.get('zookeeper_url', 'https://zookeeper.stanford.edu')
+        self.zookeeper_api = config_dict.get('zookeeper_api', '')
 
     
     def to_dict(self):
         dict = {
             'show_title' : self.show_title,
-            'show_start_time' : self.show_start_time,
-            'display_track_start_time' : self.display_track_start_time
         }
         return dict
 
@@ -194,12 +194,11 @@ class LiveShowDialog(simpledialog.Dialog):
         self.show_title = show_title
         self.show_start = show_start
         self.show_title_entry = None
-        self.show_start_combo = None
         self.ok_clicked = False
         super().__init__(parent, "Live Show Info")
 
     def body(self, master):
-        info_msg = "Enter the name and start time of your Zookeeper playlist. Note that you must manually create the playlist yourself using the Zookeeper prior to the start of your program."
+        info_msg = "Enter the name of your Zookeeper playlist. Note that playlist must be created in Zookeeper in order to complete this operation."
 
         tk.Label(master, text=info_msg, wraplength=450, justify=tk.LEFT).grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
 
@@ -207,31 +206,11 @@ class LiveShowDialog(simpledialog.Dialog):
         self.show_title_entry = tk.Entry(master, width=40)
         self.show_title_entry.insert(0, self.show_title)
         self.show_title_entry.grid(row=1, column=1, padx=5, pady=5)
-
-        tk.Label(master, text="Show Start:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-        self.show_start_combo = ttk.Combobox(master, state="readonly", width=15)
-        self.show_start_combo.grid(row=2, column=1, sticky='w', padx=5, pady=5)
-        self.show_start_combo.bind("<<ComboboxSelected>>", self.on_showstart_change)
-
-        now_hour = datetime.datetime.now().hour
-        time_values = ["NOW"]
-        for i in range(now_hour+1, 24):
-            hour = i - 12 if i > 12 else i
-            suffix = ' am' if i < 12 else ' pm'
-            time_values.append(f"{hour} {suffix}")
-
-        self.show_start_combo['values'] = time_values
         return self.show_title_entry  # focus on artist field by default
-
-    def on_showstart_change(self, event):
-        newval = self.show_start_combo.get()
-        print(f"show start change: {newval}")
-        newstate = tk.DISABLED if len(newval) == 0 else tk.NORMAL
-        self.ok_button.config(state=newstate)
 
     def buttonbox(self):
         box = tk.Frame(self)
-        self.ok_button = tk.Button(box, text="OK", width=10, command=self.ok, state=tk.DISABLED)
+        self.ok_button = tk.Button(box, text="OK", width=10, command=self.ok)
         self.ok_button.pack(side=tk.LEFT, padx=5, pady=5)
         cancel_button = tk.Button(box, text="Cancel", width=10, command=self.cancel)
         cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
@@ -239,25 +218,7 @@ class LiveShowDialog(simpledialog.Dialog):
 
     def apply(self):
         # When Save is clicked
-        delta_seconds = 5
-        show_title = self.show_title_entry.get()
-        start_time_str = self.show_start_combo.get()
-        if start_time_str != "NOW":
-            show_start_ar = start_time_str.split(' ')
-            is_am = show_start_ar[1].strip() == 'am'
-            start_hour = int(show_start_ar[0])
-            if start_hour == 12 and is_am:
-                start_hour = 0
-            elif not is_am and start_hour != 12:
-                start_hour = start_hour + 12
-       
-            print(f"start_hour: {start_hour}")
-            now = datetime.datetime.now()
-            show_start = now.replace(hour=start_hour, minute=0, second=0)
-            delta_seconds = (show_start - now).total_seconds() + 5
-            print(f"delta: {delta_seconds}, {delta_seconds / 3600}, {delta_seconds / 60}")
-
-        self.parent.after(delta_seconds * 1024, self.parent.playlist.check_show_playlist, show_title)
+        self.parent.after(10, self.parent.playlist.check_show_playlist, self.show_title_entry.get())
 
 class UserConfigurationDialog(simpledialog.Dialog):
     def __init__(self, parent, user_configuration):
@@ -266,9 +227,6 @@ class UserConfigurationDialog(simpledialog.Dialog):
         self.configuration = user_configuration
         self.show_title_entry = None
         self.show_start_combo = None
-        self.display_track_start_time_cbox = None
-        self.display_track_start_time = tk.IntVar()
-        self.display_track_start_time.set(1 if user_configuration.display_track_start_time else  0)
         self.ok_clicked = False
         super().__init__(parent, "Configuration")
 
@@ -289,29 +247,13 @@ class UserConfigurationDialog(simpledialog.Dialog):
         self.show_start_combo['values'] = time_values
         self.show_start_combo.set(time_values[self.configuration.show_start_time])
 
-        self.display_track_start_time_cbox = ttk.Checkbutton(master, text="Display Track Start Times", onvalue=1, offvalue=0, variable=self.display_track_start_time)
-        self.display_track_start_time_cbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
 
-        
         return self.show_title_entry  # focus on artist field by default
 
     def apply(self):
         # When Save is clicked
         self.ok_clicked = True
         self.configuration.show_title = self.show_title_entry.get()
-        self.configuration.display_track_start_time = self.display_track_start_time.get() == 1
-
-        start_hour = ''
-        show_start_ar = self.show_start_combo.get().split(' ')
-        if len(show_start_ar) == 2:
-            is_am = show_start_ar[1].strip() == 'am'
-            start_hour = int(show_start_ar[0])
-            if start_hour == 12 and is_am:
-                start_hour = 0
-            elif not is_am and start_hour != 12:
-                start_hour = start_hour + 12
-
-        self.configuration.show_start_time = start_hour
         self.configuration.save_config()
 
 class TrackEditDialog(simpledialog.Dialog):
@@ -382,40 +324,34 @@ class Playlist():
 
         self.parent = parent
         self.track_idx = 0
-        self.set_apikey()
         self.id = None
+        self.start_hour = 0.0
+        self.end_hour = 0.0
         self.ssl_context = ssl._create_unverified_context()
 
-    def set_apikey(self):
-        #hostname = socket.gethostname()
-        #ipv4_address = socket.gethostbyname(hostname)
+    # return true if playlist is active and within start/end window
+    def _is_active(self):
+        is_active = False
+        if self.id:
+            now_date = datetime.datetime.now()
+            now_hour = now_date.hour + now_date.minute / 60
+            if self.end_hour > self.start_hour:
+                is_active = self.start_hour <= now_hour  <= self.end_hour
+            else:
+                is_active = now_hour >= self.start_hour or now_hour < self.end_hour
 
-        #key_file = 'zookeeper-local.txt'
-        #if ipv4_address.startswith("171.66.118"):
-        #    key_file = 'zookeeper-production.txt'
+            logit(f"is_active: {self.start_hour}, {now_hour}, {self.end_hour}, {is_active}")
 
-        #key_file = 'zookeeper-production.txt'
-        key_file = 'zookeeper-local.txt'
+        return is_active
 
-        if os.path.exists(key_file):
-            file = open(key_file, 'r')
-            lines = file.readlines()
-            for idx, line in enumerate(lines, start=0):
-                if line.find('#') < 0:
-                    self.API_KEY = line[0:-1]
-                    self.API_URL = lines[idx+1][0:-1]
-                    break
-        else:
-             logit("Warning: Zookeeper key file not found. " + key_file)
-
-    
     def send_track(self, track):
-        logit("enter send_track")
-        if not self.id or is_pause_file(track.title) or track.title.startswith("LID_"):
+        start_time = time.time_ns()
+        if not self.id or not self._is_active() or is_pause_file(track.title) or track.title.startswith("LID_"):
             logit(f"abort send_track {self.id}")
             return
 
-        url = self.API_URL + f'/api/v2/playlist/{self.id}/events'
+        print("tp0")
+        url = self.parent.configuration.zookeeper_url + f'/api/v2/playlist/{self.id}/events'
         method = "POST" # timestamp this track
         event_type = 'break' if is_mic_break_file(track.title) else 'spin'
         event =  {
@@ -430,43 +366,53 @@ class Playlist():
              }
         }
 
+        print("tp1")
         data = {"data" : event}
         data_json = json.dumps(data)
         req = urllib.request.Request(url, method=f'{method}')
         req.add_header("Content-type", "application/vnd.api+json")
         req.add_header("Accept", "text/plain")
-        req.add_header("X-APIKEY", self.API_KEY)
+        req.add_header("X-APIKEY", self.parent.configuration.zookeeper_api)
         
         try:
+            print("tp2")
             with urllib.request.urlopen(req, data=data_json.encode('utf-8'), timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
                 resp_obj  = json.loads(response.read())
+                print(f"tp3 {resp_obj}")
         except Exception as e:
             logit(f"Exception posting track: {url}, {e}")
 
-        logit("exit send_track")
+        end_time = time.time_ns()
+        print(f"exit send_track {(end_time - start_time) // 1_000_000}")
 
-    def check_show_playlist(self, show_title):
-        have_playlist = False
+    def check_show_playlist(self, target_title):
         self.id = None
-        url = self.API_URL + '/api/v2/playlist?filter[date]=onNow'
+        now_date = datetime.datetime.now().date().isoformat()
+        url = self.parent.configuration.zookeeper_url + f'/api/v2/playlist?filter[date]={now_date}'
 
         try:
+            target_title_lc = target_title.lower()
             with urllib.request.urlopen(url, timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
-                resp_obj  = json.loads(response.read())
-                playlist = resp_obj['data'][0]
-                attrs = playlist['attributes']
-                show_name = attrs['name']
-                have_playlist = show_name.lower() == show_title.lower()
-                if have_playlist:
-                    self.id = playlist['id']
+                playlists  = json.loads(response.read())['data']
+                for  playlist in playlists:
+                     attrs = playlist['attributes']
+                     if attrs['name'].lower() == target_title_lc:
+                         self.id = playlist['id']
+                         time_ar = attrs['time'].split('-')
+                         self.start_hour = float(time_ar[0][:2]) + (int(time_ar[0][2:4]) / 60.0)
+                         self.end_hour = float(time_ar[1][:2]) + (int(time_ar[1][2:4]) / 60.0)
+                         msg = f'Playlist found. Track spins will be logged to {target_title} between {time_ar[0]} and {time_ar[1]}, {self.id}'
+                         tk.messagebox.showwarning(title="Info", message=msg)
+                         break
+                      
         except Exception as e:
             logit(f"Exception getting playlist: {url}, {e})")
 
-        if not have_playlist:
+        if not self.id:
             self.parent.live_show.set(False)
-            tk.messagebox.showwarning(title="Error", message=f'Zookeeper playlist not found.')
+            tk.messagebox.showwarning(title="Error", message=f"Zookeeper playlist '{target_title}' not found.")
           
-        return have_playlist
+        return self.id != None
 
 
 class AudioPlaylistApp(BaseTk):
@@ -496,6 +442,9 @@ class AudioPlaylistApp(BaseTk):
         self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
         self.configuration = UserConfiguration.load_config()
 
+        self.bind('<FocusIn>', lambda e: self._on_focus_in())
+        self.bind('<FocusOut>', lambda e: self._on_focus_out())
+
         self._dragging_item = None          # internal reorder
         self._dragging_start_id = None          # internal reorder
         self._dragging_active = False
@@ -521,6 +470,12 @@ class AudioPlaylistApp(BaseTk):
         # Initial output devices + auto-refresh
         self._refresh_output_devices()
 
+    def _on_focus_in(self):
+        self.have_focus = True
+
+    def _on_focus_out(self):
+        self.have_focus = False
+
     def _on_close(self):
         msg = "Quiting now will drop your recent changes. Are you sure that you want to quit?"
         if self.is_dirty and not messagebox.askokcancel("Quit", msg):
@@ -530,10 +485,12 @@ class AudioPlaylistApp(BaseTk):
 
     def _fetch_track(self, useFullName=True):
             trackurl = self.urlEntry.get() 
-            self.downloader.fetch_track(trackurl, useFullName)
-            self.url.config(cursor="clock")
-            self.url.update()
-            self._fetch_track_done(1)
+            if self.downloader.fetch_track(self, trackurl, useFullName):
+                self.url.config(cursor="clock")
+                self.url.update()
+                self._fetch_track_done(1)
+            else:
+                self.url.config(cursor="")
 
                 
     def _fetch_track_done(self, dummy):
@@ -542,8 +499,13 @@ class AudioPlaylistApp(BaseTk):
         else:
             self.bell()
             if self.downloader.name_too_long:
-                if tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
-                    self.downloader.fetch_track(False)
+                if tk.messagebox.askokcancel(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
+                    self.downloader.is_done = False
+                    self.downloader.name_too_long = False
+                    self.downloader.fetch_track(self, 'dummy-url', False)
+                    self.after(500, self._fetch_track_done(1))
+                else:
+                    return
             elif self.downloader.track.track_file:
                 self.url.delete(0, "end")
                 self.url.config(cursor="")
@@ -685,7 +647,7 @@ class AudioPlaylistApp(BaseTk):
         self.bind("<BackSpace>", lambda e: self._delete_selected())
 #        self.bind("<Up>", lambda e: self._move_selection(-1))
 #        self.bind("<Down>", lambda e: self._move_selection(1))
-        self.bind("<Return>", lambda e: self.play_selected())
+#        self.bind("<Return>", lambda e: self.play_selected())
         self.bind("<Control-c>", lambda e: self.copy_selected_rows())
         self.bind("<Command-c>", lambda e: self.copy_selected_rows())
 
@@ -825,6 +787,11 @@ class AudioPlaylistApp(BaseTk):
             start_time_secs = start_time_secs + track.duration
 
     def _delete_selected(self):
+        msg = "Do you want to also delete the files associated with the selected entries?"
+        resp = messagebox.askokcancel("Confirm Request", msg)
+        print(f"resp: {resp}")
+        return
+
         for item in self.tree.selection():
             self.tree.delete(item)
             self.tree_datamap.pop(item, None)
@@ -1004,7 +971,6 @@ class AudioPlaylistApp(BaseTk):
         elif is_pause_file(title):
             tags = ("pause")
 
-        print(f"title: {title}")
         duration = 0 if is_stop_file(title) else len(AudioSegment.from_file(path))/1000
         id = self.tree.insert("", insert_index, values=(insert_index+1, "-1", artist, title, ""), tags=tags)
         track = Track(id, artist, title, '', path, duration)
@@ -1201,7 +1167,8 @@ class AudioPlaylistApp(BaseTk):
             logit(f'File does not exist {fp}')
             return
 
-        start_hour = self.configuration.show_start_time
+#        start_hour = self.configuration.show_start_time
+        start_hour = 0
         if start_hour >= 0:
             total_secs = start_hour * 60 * 60
 
@@ -1282,6 +1249,7 @@ class AudioPlaylistApp(BaseTk):
         if self._play_thread and self._play_thread.is_alive() and not self._stop_playback.is_set():
             self._stop_playback.set()
         else:
+            print("tp0")
             self.play_selected()
 
     def live_show_change(self):
@@ -1333,10 +1301,15 @@ class AudioPlaylistApp(BaseTk):
 
     def play_selected(self):
         sel = self.tree.selection()
-        if not sel:
+
+        # need focus check because double clicking in tree while the app is not in
+        # focus results in this being called twice, once pre and then posts focus so
+        # we ignore the first one.
+        if not self.have_focus or not sel:
             return
 
         idx = self.tree.index(sel[0])
+        print(f"play selected: {idx}")
         self._play_index(idx)
 
     def _play_index(self, index: int):
@@ -1427,7 +1400,7 @@ class AudioPlaylistApp(BaseTk):
         if self._play_thread and self._play_thread.is_alive():
             print("set stop_playback")
             self._stop_playback.set()
-            self._play_thread.join(timeout=0.3)
+            self._play_thread.join(timeout=1.0)
 
         self._play_thread = None
         print("clear stop_playback")

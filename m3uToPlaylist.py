@@ -129,6 +129,44 @@ def getTitlesYouTube(artist, track):
 
     return choices
 
+def getTracksYouTube(artist, track):
+    yt = YTMusic()
+
+    if track.endswith(".mp3") or track.endswith(".wav"):
+        track = track[0:-4]
+
+    track = track.strip()
+    artist = artist.strip()
+    search_key = '"' + artist + '" "' + track + '"'
+
+    # search types: songs, videos, albums, artists, playlists, community_playlists, featured_playlists, uploads
+    search_results = yt.search(search_key, 'songs')
+    #print("YouTube search for -{}- found {} items".format(search_key, len(search_results)))
+
+    choices =[]
+    releases = []
+    artist_lc = artist.lower()
+    releaseTitle = None
+    singleTitle = None
+    for item in search_results:
+        artists = ''
+        for artist_row in item.get('artists', []):
+            artists = artist_row['name'] + ', '
+
+        #print("item: {}, {}".format(artists, item['title']))
+
+        if artists.lower().find(artist_lc) >= 0:
+            releaseTitle = item['title']
+            #key = '{} -\t {}'.format(artists, releaseTitle)
+            if releaseTitle not in releases:
+                choices.append(item)
+                releases.append(releaseTitle)
+
+    if len(choices) == 0:
+        print(f"YouTube search for {track} by {artist} found {len(choices)} items")
+
+    return choices
+
 def findTitleYouTube(artist, track):
     choices = getTitlesYouTube(artist, track)
     if len(choices) == 0:
@@ -154,7 +192,7 @@ def get_spotify_token() -> Optional[str]:
     auth_url = 'https://accounts.spotify.com/api/token'
     response = requests.post(auth_url, { # TODO: load from external file
         'grant_type': 'client_credentials',
-        'client_id': '', 
+        'client_id': '',
         'client_secret': ''
     })
     if response.status_code != 200:

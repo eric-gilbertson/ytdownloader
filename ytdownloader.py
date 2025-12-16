@@ -146,10 +146,10 @@ class ControlPanel(object):
     def _fetch_url_start(self, useFullName=True):
         trackurl = self.urlEntry.get()
         logit("load url: " + trackurl)
-        self.downloader.fetch_track(trackurl, useFullName)
-        control_panel.url.config(cursor="clock")
-        control_panel.url.update()
-        self._fetch_url_done(1)
+        if self.downloader.fetch_track(root, trackurl, useFullName):
+            control_panel.url.config(cursor="clock")
+            control_panel.url.update()
+            self._fetch_url_done(1)
 
     def _fetch_url_done(self, dummy):
         if not self.downloader.is_done:
