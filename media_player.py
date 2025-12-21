@@ -269,7 +269,7 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_title  = ""
         self.track_album = ""
 
-        super().__init__(parent, hdr_title)
+        super().__init__(parent, hdr_title);
 
 
 
@@ -318,7 +318,7 @@ class Track():
         self.duration = duration # seconds
 
 
-class Playlist():
+class ZKPlaylist():
     def __init__(self, parent):
         super().__init__()
 
@@ -410,7 +410,7 @@ class Playlist():
 
         if not self.id:
             self.parent.live_show.set(False)
-            tk.messagebox.showwarning(title="Error", message=f"Zookeeper playlist '{target_title}' not found.")
+            tk.messagebox.showwarning(title="Error", message=f"Zookeeper playlist '{target_title}' not found.", parent=self.parent)
           
         return self.id != None
 
@@ -419,15 +419,14 @@ class AudioPlaylistApp(BaseTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Audio Playlist Player")
+        self.DEFAULT_TITLE = "DJ Tool"
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.geometry("600x600")
         self.minsize(480, 360)
         self.is_dirty = False
 
-        self.app_title = ''
-        self._set_title("Playlist Player")
+        self._set_title()
         self.playlist_file = ''
 
         # ----- State -----
@@ -438,7 +437,7 @@ class AudioPlaylistApp(BaseTk):
         self._audio_total_ms = 0
         self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
-        self.playlist = Playlist(self)
+        self.playlist = ZKPlaylist(self)
         self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
         self.configuration = UserConfiguration.load_config()
 
@@ -478,19 +477,21 @@ class AudioPlaylistApp(BaseTk):
 
     def _on_close(self):
         msg = "Quiting now will drop your recent changes. Are you sure that you want to quit?"
-        if self.is_dirty and not messagebox.askokcancel("Quit", msg):
+        if self.is_dirty and not messagebox.askokcancel("Quit", msg, parent=self):
             return
 
         self.destroy()
 
     def _fetch_track(self, useFullName=True):
-            trackurl = self.urlEntry.get() 
-            if self.downloader.fetch_track(self, trackurl, useFullName):
-                self.url.config(cursor="clock")
-                self.url.update()
-                self._fetch_track_done(1)
-            else:
-                self.url.config(cursor="")
+        trackurl = self.urlEntry.get() 
+        if ';' not in trackurl and 'youtube.com' not in trackurl:
+            tk.messagebox.showwarning(title="Error", message=f"Invalid song request. Use either a Youtube video URL or <ARTIST_NAME>;<SONG_TITLE>")
+        elif self.downloader.fetch_track(self, trackurl, useFullName):
+            self.url.config(cursor="clock")
+            self.url.update()
+            self._fetch_track_done(1)
+        else:
+            self.url.config(cursor="")
 
                 
     def _fetch_track_done(self, dummy):
@@ -507,12 +508,14 @@ class AudioPlaylistApp(BaseTk):
                 else:
                     return
             elif self.downloader.track.track_file:
+                self.is_dirty = True
                 self.url.delete(0, "end")
                 self.url.config(cursor="")
                 self.url.update()
     
                 #append track to current list
-                self._insert_track(-1, self.downloader.track.artist, self.downloader.track.title, self.downloader.track.track_file, True)
+                track = self.downloader.track
+                self._insert_track(-1, track.artist, track.title, track.album, track.track_file, True)
             else:
                 tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
 
@@ -567,17 +570,47 @@ class AudioPlaylistApp(BaseTk):
     def _build_urlentry(self, rownum):
         bottom = tk.Frame(self)
         bottom.grid(row=rownum, column=0, sticky="ew")
-        lbl = tk.Label(bottom, text='URL:').pack(side='left')
+        lbl = tk.Label(bottom, text='Song:').pack(side='left')
         self.urlEntry = tk.StringVar()
         self.url = tk.Entry(bottom, textvariable=self.urlEntry, width=39)
         self.url.pack(side='left')
         self.url.bind('<Return>', self._on_url_enter)
+        #self.url.bind('<KeyPress>', self._on_url_keypress)
+        self.url.bind('<space>', self._on_url_space)
         button = tk.Button(bottom, command= self._fetch_track, text="Fetch", width=5, fg="black")  
         button.pack(side='left')
 
     def _on_url_enter(self, widget):
         logit("enter: " + self.url.get())
         self._fetch_track()
+
+    def _on_url_space(self, event):
+        event.widget.insert("insert", event.char)
+        return "break"
+
+    def _on_url_keypress(self, event):
+        w = event.widget
+        keysym = event.keysym
+
+        print(f"key {event.keysym}")
+        if (event.state & 0xC):  # 0xC works for Max & Windows
+            if keysym.lower() == "c":  # Copy
+                w.event_generate("<<Copy>>")
+            if keysym.lower() == "x":  # Cut
+                w.event_generate("<<Cut>>")
+            if keysym.lower() == "v":  # Paste
+                w.event_generate("<<Paste>>")
+        elif event.keysym == "Return":
+            logit("enter: " + self.url.get())
+            self._fetch_track()
+        elif event.keysym == "BackSpace":
+            index = w.index("insert")
+            if index > 0:
+                w.delete(index - 1)
+        elif event.char and len(event.char) == 1:
+            w.insert("insert", event.char)
+
+        return "break"
 
     def _build_treeview(self, rownum):
         wrap = ttk.Frame(self)
@@ -614,12 +647,15 @@ class AudioPlaylistApp(BaseTk):
         self._insert_line = tk.Frame(self.tree, height=2, bg="blue", highlightthickness=0)
         self._hide_insert_line()
 
-        # Internal reorder bindings - ejg
+        # treeview bindings
+        #self.tree.bind("<space>", lambda e: self._toggle_play_pause())
         self.tree.bind("<Double-1>", lambda e: self.play_selected())
         self.tree.bind("<ButtonPress-1>", self._tv_on_btn1_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_drag_motion_internal, add="+")
         self.tree.bind("<ButtonRelease-1>", self._on_drop_internal, add="+")
         self.tree.bind("<Leave>", lambda e: self._hide_insert_line(), add="+")
+        self.tree.bind("<Delete>", lambda e: self._delete_selected())
+        self.tree.bind("<BackSpace>", lambda e: self._delete_selected())
 
 
         self.tree.bind("<Shift-Up>", lambda e: self.on_shift_arrow(e, "up"))
@@ -640,16 +676,17 @@ class AudioPlaylistApp(BaseTk):
         self.countdown_label = tk.Label(self, text="00:00", anchor="e", font=("Arial", 14))
         self.countdown_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
+    # global bindings
     def _bind_shortcuts(self):
-        self.bind("<space>", lambda e: self._toggle_play_pause())
-        self.bind("<s>", lambda e: self.stop_audio())
-        self.bind("<Delete>", lambda e: self._delete_selected())
-        self.bind("<BackSpace>", lambda e: self._delete_selected())
+        self.bind_all("<space>", lambda e: self._toggle_play_pause())
+#        self.bind("<s>", lambda e: self.stop_audio())
+#        self.bind("<Delete>", lambda e: self._delete_selected())
+#        self.bind("<BackSpace>", lambda e: self._delete_selected())
 #        self.bind("<Up>", lambda e: self._move_selection(-1))
 #        self.bind("<Down>", lambda e: self._move_selection(1))
 #        self.bind("<Return>", lambda e: self.play_selected())
-        self.bind("<Control-c>", lambda e: self.copy_selected_rows())
-        self.bind("<Command-c>", lambda e: self.copy_selected_rows())
+#        self.bind("<Control-c>", lambda e: self.copy_selected_rows())
+#        self.bind("<Command-c>", lambda e: self.copy_selected_rows())
 
 
     # ======================= OUTPUT DEVICES =======================
@@ -708,12 +745,12 @@ class AudioPlaylistApp(BaseTk):
     def insert_pause(self):
         print("insert pause")
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '', PAUSE_FILE, PAUSE_FILE, True)
+        self._insert_track(insert_index, '', PAUSE_FILE, '', PAUSE_FILE, True)
 
     def insert_mic_break(self):
         print("insert mic_break")
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '', MIC_BREAK_FILE, MIC_BREAK_FILE, True)
+        self._insert_track(insert_index, '', MIC_BREAK_FILE, '', MIC_BREAK_FILE, True)
 
 
     def edit_selected_track(self):
@@ -734,10 +771,7 @@ class AudioPlaylistApp(BaseTk):
         artist = track.artist
         title = track.title
         album = track.album
-        dialog = TrackEditDialog(self, "Edit Track",
-                            artist,
-                            title,
-                            album)
+        dialog = TrackEditDialog(self, "Edit Track", artist, title, album)
     
         if dialog.ok_clicked:
             self.is_dirty = True
@@ -750,7 +784,7 @@ class AudioPlaylistApp(BaseTk):
         else:
             logit("Canceled or no input provided.")
     
-        #self.deiconify()  # restore main window
+        self.tree.focus_force() 
 
     def on_shift_arrow(self, event, direction):
         selection = self.tree.selection()
@@ -787,15 +821,21 @@ class AudioPlaylistApp(BaseTk):
             start_time_secs = start_time_secs + track.duration
 
     def _delete_selected(self):
-        msg = "Do you want to also delete the files associated with the selected entries?"
-        resp = messagebox.askokcancel("Confirm Request", msg)
-        print(f"resp: {resp}")
-        return
+        msg = "Do you want to also delete the audio files associated with the selected entries?"
+        response = messagebox.askyesnocancel("Confirm Request", msg, parent=self)
+        self.tree.focus_set()      # Explicitly set focus back to the main window
 
-        for item in self.tree.selection():
-            self.tree.delete(item)
-            self.tree_datamap.pop(item, None)
-        self._renumber_rows()
+        if response is None:
+            return
+        else:
+            for item_id in self.tree.selection():
+                self.tree.delete(item_id)
+                track = self.tree_datamap.pop(item_id, None)
+                if response and os.path.exists(track.file_path):
+                    os.remove(track.file_path)
+  
+            self._renumber_rows()
+            self.is_dirty = True
 
     def _move_selection(self, direction: int):
         items = self.tree.get_children("")
@@ -943,8 +983,8 @@ class AudioPlaylistApp(BaseTk):
                 tk.messagebox.showwarning(title="Error", message=f'Ignoring invalid file:" {path}')
                 continue
 
-            (artist, title) = self._get_track_info(path)
-            self._insert_track(insert_index, artist, title, path, file_count == 0)
+            (artist, title, album) = self._get_track_info(path)
+            self._insert_track(insert_index, artist, title, album, path, file_count == 0)
             insert_index += 1  # subsequent files go after
             file_count = file_count - 1
 
@@ -952,16 +992,20 @@ class AudioPlaylistApp(BaseTk):
 
     def _get_track_info(self, file_path):
         artist = ''
+        album = ''
         title = os.path.basename(file_path[0:-4])
         titleAr = title.split('^')
         if len(titleAr) > 1:
             artist = titleAr[0].strip()
             title = titleAr[1].strip()
 
-        return (artist, title)
+        if len(titleAr) > 2:
+            album = titleAr[2].strip()
+
+        return (artist, title, album)
 
 
-    def _insert_track(self, insert_index, artist, title, path, update_list):
+    def _insert_track(self, insert_index, artist, title, album, path, update_list):
         if insert_index == -1:
             insert_index = len(self.tree.get_children(""))
 
@@ -972,8 +1016,8 @@ class AudioPlaylistApp(BaseTk):
             tags = ("pause")
 
         duration = 0 if is_stop_file(title) else len(AudioSegment.from_file(path))/1000
-        id = self.tree.insert("", insert_index, values=(insert_index+1, "-1", artist, title, ""), tags=tags)
-        track = Track(id, artist, title, '', path, duration)
+        id = self.tree.insert("", insert_index, values=(insert_index+1, "-1", artist, title, album), tags=tags)
+        track = Track(id, artist, title, album, path, duration)
         self.tree_datamap[id] = track
     
         if update_list:
@@ -1056,12 +1100,21 @@ class AudioPlaylistApp(BaseTk):
         if not dir_path:
             return
 
-        audio_files = glob.glob(dir_path + "/*.mp3") + glob.glob(dir_path + "/*.wav")
-        for idx, file_path in enumerate(audio_files):
-            (artist, title) = self._get_track_info(file_path)
-            self._insert_track(-1, artist, title, file_path, False)
+        current_files = []
+        for track in self.tree_datamap.values():
+            current_files.append(track.file_path)
 
-        self._renumber_rows()
+        audio_files = glob.glob(dir_path + "/*.mp3") + glob.glob(dir_path + "/*.wav")
+        new_files = False
+        for idx, file_path in enumerate(audio_files):
+            if not file_path in current_files:
+                (artist, title, album) = self._get_track_info(file_path)
+                self._insert_track(-1, artist, title, album, file_path, False)
+                new_files = True
+
+        if new_files:
+            self.is_dirty = True
+            self._renumber_rows()
 
     def update_playlist(self):
         if os.path.exists(self.playlist_file):
@@ -1390,6 +1443,7 @@ class AudioPlaylistApp(BaseTk):
 
             # Natural end -> play next (unless stopped)
             print("check play next")
+            self._set_title("")
             if not self._stop_playback.is_set():
                 self.after(120, self._play_next_track)
             else:
@@ -1403,7 +1457,6 @@ class AudioPlaylistApp(BaseTk):
             self._play_thread.join(timeout=1.0)
 
         self._play_thread = None
-        print("clear stop_playback")
         #self._stop_playback.clear()
         self._audio_pos_ms = 0
         self._set_countdown("")
@@ -1420,14 +1473,16 @@ class AudioPlaylistApp(BaseTk):
             self.tree.see(next_item)
             self._play_index(idx + 1)
 
-    def _set_title(self, title_str):
-        self.app_title = title_str
+    def _set_title(self, title_str=''):
+        print(f"_set_title: {title_str}")
+        self.app_title = title_str if len(title_str) > 0 else self.DEFAULT_TITLE
         self.title(self.app_title)
 
     # ----- Countdown updates -----
     def _set_countdown(self, time_str):
-        if time_str == '':
-            self.app_title = "DJ Tool"
+#        if time_str == '':
+#            print("clear title")
+#            self.app_title = "DJ Tool"
 
         self.title(f"{self.app_title} {time_str}")
 
@@ -1452,5 +1507,6 @@ class AudioPlaylistApp(BaseTk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
+    #app.load_playlist("/Users/barbara/Music/test.csv")
     app.mainloop()
 

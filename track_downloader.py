@@ -49,6 +49,7 @@ class TrackDownloader():
         self.track = Track('', '', '', '', '', 0)
         self.track_url = ''
         self.track_file = None
+        self.track_album = ''
         self.is_done = False
 
         if not os.path.exists(download_dir):
@@ -75,6 +76,7 @@ class TrackDownloader():
                 if not dialog.ok_clicked or len(dialog.track_id) == 0:
                     return False
 
+                self.track_album = dialog.album
                 self.track_url = f"https://youtube.com/watch?v={dialog.track_id}"
         elif use_fullname:
             self.track_url = track_specifier
@@ -102,6 +104,7 @@ class TrackDownloader():
                 self.errMsg = ''
                 self.track.track_file =  stdOut[idx1:idx2+4]
                 print("Downloaded file: " + self.track.track_file)
+                self.track.album = self.track_album
                 (self.track.track_file, self.track.artist, self.track.title)  = self.clean_filepath(self.track.track_file)
                 trim_audio(self.track.track_file)
 
@@ -282,14 +285,10 @@ class TrackEditDialog(simpledialog.Dialog):
         self.initial_title = track_title
         self.initial_album = track_album
         self.ok_clicked = False
-
         self.track_artist = ""
         self.track_title  = ""
         self.track_album = ""
-
         super().__init__(parent, hdr_title)
-
-
 
     def body(self, master):
         #self.transient(master)  # stay on top of parent
