@@ -127,7 +127,7 @@ class ControlPanel(object):
         self._play_file()
 
     def delete_click(self, event):
-        if not messagebox.askyesno("Confirmation", "Are you sure you want to deleted the selected files?"):
+        if not messagebox.askyesno("Confirmation", "Are you sure you want to deleted the selected files?", parent=root):
             return
 
         for item in self.list_widget.tree.selection():

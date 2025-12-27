@@ -81,8 +81,8 @@ class TrackDownloader():
         elif use_fullname:
             self.track_url = track_specifier
 
-        if not "youtube.com" in self.track_url:
-            tk.messagebox.showwarning(title="Error", message=f"Invalid request entry. Use either a Youtube video URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME>;<SONG_TITLE>")
+        if not "youtube.com/watch?" in self.track_url:
+            tk.messagebox.showwarning(title="Error", message=f"Invalid request entry. Use either a Youtube watch URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME>;<SONG_TITLE>")
             return False
 
         cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.track_url)
@@ -248,6 +248,9 @@ class SelectTrackDialog(simpledialog.Dialog):
         self.choices_entry.insert("1.0", tracks)
         self.track_info.insert(0, f'{self.artist} - {self.track_title}')
 
+        if idx > 1:
+            self.choice_entry.insert(0, '1')
+
         self.choice_entry.focus_set()
  
         # Place widgets
@@ -263,8 +266,8 @@ class SelectTrackDialog(simpledialog.Dialog):
         if len(choice) == 0:
             self.ok_clicked = False
         elif len(choice) == 1:
-            choice_num = int(choice)
-            self.track_id = self.track_choices[choice_num]['album']['videoId']
+            choice_num = int(choice) - 1
+            self.track_id = self.track_choices[choice_num]['videoId']
 
     def _select_row(self, event):
         index = self.choices_entry.index(f"@{event.x},{event.y}")
