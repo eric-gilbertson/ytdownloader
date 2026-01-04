@@ -21,18 +21,17 @@ from multiprocessing.process import parent_process
 from os.path import expanduser
 import time
 
-from fcc_checker import fcc_song_check
-from m3uToPlaylist import getTitlesYouTube
+from fcc_checker import FCCChecker
 import json, re, datetime, yaml
 import math, os, shlex, socket, ssl, threading, traceback
 import urllib.request
 from urllib.parse import unquote
 import tkinter as tk
-from tkinter import simpledialog
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import pyaudio
 from pydub import AudioSegment
-from track_downloader import TrackDownloader
+from track_downloader import TrackDownloader, getTitlesYouTube
+from djutils import logit
 
 # download directory to the staging dir
 YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl/staging"
@@ -50,12 +49,6 @@ except Exception:
     BaseTk = tk.Tk
     DND_FILES = None
     DND_AVAILABLE = False
-
-def logit(msg):
-    timestr = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S: ")
-    with open('/tmp/djplayer_log.txt', 'a') as logfile:
-        logfile.write(timestr + msg + '\n')
-
 
 def is_stop_file(file_name):
     return file_name == PAUSE_FILE or file_name == MIC_BREAK_FILE
@@ -273,9 +266,7 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_album = ""
         self.track_fcc_status = ""
 
-        super().__init__(parent, hdr_title);
-
-
+        super().__init__(parent, hdr_title)
 
     def body(self, master):
         #self.transient(master)  # stay on top of parent
@@ -297,14 +288,16 @@ class TrackEditDialog(simpledialog.Dialog):
         self.album_entry = tk.Entry(master, width=40)
         self.album_entry.insert(0, self.initial_album)
 
-        self.fcc_status_entry = tk.Entry(master, width=20)
-        self.fcc_status_entry.insert(0, self.initial_fcc_status)
+        self.fcc_status_combo = ttk.Combobox(master, state="readonly", width=20)
+        self.fcc_status_combo.insert(0, self.initial_fcc_status)
+        self.fcc_status_combo['values'] = FCCChecker.FCC_STATUS_AR
+        self.fcc_status_combo.set(self.initial_fcc_status)
 
         # Place widgets
         self.artist_entry.grid(row=0, column=1, padx=5, pady=5)
         self.title_entry.grid(row=1, column=1, padx=5, pady=5)
         self.album_entry.grid(row=2, column=1, padx=5, pady=5)
-        self.fcc_status_entry.grid(row=3, column=1, sticky='e', padx=5, pady=5)
+        self.fcc_status_combo.grid(row=3, column=1, sticky='w', padx=5, pady=5)
 
         return self.artist_entry  # focus on artist field by default
 
@@ -314,11 +307,11 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_artist = self.artist_entry.get()
         self.track_title = self.title_entry.get()
         self.track_album = self.album_entry.get()
-        self.track_fcc_status = self.fcc_status_entry.get()
+        self.track_fcc_status = self.fcc_status_combo.get()
 
 
 class Track():
-    FCC_STATUS_IMAGE = {"CLEAN" : '✅', 'DIRTY': '🛑', 'UNKNOWN': '?'}
+    FCC_STATUS_IMAGE = {"CLEAN" : '✅', 'DIRTY': '⛔', 'NOT_FOUND': '✋'}
 
     def __init__(self, id, fcc_status, artist, title, album,  file_path, duration):
         super().__init__()
@@ -343,8 +336,9 @@ class Track():
         have_status = len(self.fcc_status) > 0 and self.fcc_status != '-'
         return have_status
 
-    def get_fcc_image(self):
-        icon = self.FCC_STATUS_IMAGE.get(self.fcc_status, self.fcc_status)
+    def fcc_status_glyph(self):
+        glyph = self.FCC_STATUS_IMAGE.get(self.fcc_status, self.fcc_status)
+        return glyph
 
     @staticmethod
     def from_csv(csv_line):
@@ -396,7 +390,6 @@ class ZKPlaylist():
             logit(f"abort send_track {self.id}")
             return
 
-        print("tp0")
         url = self.parent.configuration.zookeeper_url + f'/api/v2/playlist/{self.id}/events'
         method = "POST" # timestamp this track
         event_type = 'break' if is_mic_break_file(track.title) else 'spin'
@@ -412,7 +405,6 @@ class ZKPlaylist():
              }
         }
 
-        print("tp1")
         data = {"data" : event}
         data_json = json.dumps(data)
         req = urllib.request.Request(url, method=f'{method}')
@@ -421,10 +413,8 @@ class ZKPlaylist():
         req.add_header("X-APIKEY", self.parent.configuration.zookeeper_api)
         
         try:
-            print("tp2")
             with urllib.request.urlopen(req, data=data_json.encode('utf-8'), timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
                 resp_obj  = json.loads(response.read())
-                print(f"tp3 {resp_obj}")
         except Exception as e:
             logit(f"Exception posting track: {url}, {e}")
 
@@ -555,7 +545,7 @@ class AudioPlaylistApp(BaseTk):
                 else:
                     return
             elif self.downloader.track.track_file:
-                self.is_dirty = True
+                self._set_dirty(True)
                 self.url.delete(0, "end")
                 self.url.config(cursor="")
                 self.url.update()
@@ -686,7 +676,7 @@ class AudioPlaylistApp(BaseTk):
         self.tree.column("artist", width=120, anchor="w", stretch=True)
         self.tree.column("title", anchor="w", stretch=True)
         self.tree.column("album", width=120, anchor="w", stretch=True)
-        self.tree.column("fcc", width=80, anchor="w", stretch=False)
+        self.tree.column("fcc", width=40, anchor="w", stretch=False)
         self.tree.grid(row=0, column=0, sticky="nsew")
 
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
@@ -824,13 +814,13 @@ class AudioPlaylistApp(BaseTk):
         dialog = TrackEditDialog(self, "Edit Track", artist, title, album, track.fcc_status)
     
         if dialog.ok_clicked:
-            self.is_dirty = True
+            self._set_dirty(True)
             track.artist = dialog.track_artist
             track.title = dialog.track_title
             track.album = dialog.track_album
             track.fcc_status = dialog.track_fcc_status
             row_values = self.tree.item(track.id)["values"]
-            row_values = (*row_values[0:2], track.artist, track.title, track.album, track.fcc_status)
+            row_values = (*row_values[0:2], track.artist, track.title, track.album, track.fcc_status_glyph())
             self.tree.item(track.id, values=row_values)
         else:
             logit("Canceled or no input provided.")
@@ -868,7 +858,7 @@ class AudioPlaylistApp(BaseTk):
         for i, item_id in enumerate(self.tree.get_children(""), start=1):
             track = self.tree_datamap[item_id]
             start_time_HMS = HMS_from_seconds(start_time_secs)
-            self.tree.item(item_id, values=(i, start_time_HMS, track.artist, track.title, track.album, track.fcc_status))
+            self.tree.item(item_id, values=(i, start_time_HMS, track.artist, track.title, track.album, track.fcc_status_glyph()))
             start_time_secs = start_time_secs + track.duration
 
     def _delete_selected(self):
@@ -886,7 +876,7 @@ class AudioPlaylistApp(BaseTk):
                     os.remove(track.file_path)
   
             self._renumber_rows()
-            self.is_dirty = True
+            self._set_dirty(True)
 
     def _move_selection(self, direction: int):
         items = self.tree.get_children("")
@@ -967,7 +957,7 @@ class AudioPlaylistApp(BaseTk):
 
 
         # Compute target by current mouse Y
-        self.is_dirty = True
+        self._set_dirty(True)
         dragging = self._dragging_item
         self._dragging_item = None
 
@@ -1019,7 +1009,7 @@ class AudioPlaylistApp(BaseTk):
             files = [data]
 
         # Determine drop index from pointer position (most robust)
-        self.is_dirty = True
+        self._set_dirty(True)
         y_local = self.tree.winfo_pointery() - self.tree.winfo_rooty()  + ROW_CORRECTION
         target_row = self.tree.identify_row(y_local)
         siblings = list(self.tree.get_children(""))
@@ -1146,11 +1136,11 @@ class AudioPlaylistApp(BaseTk):
     def fcc_check(self):
         for track in self.tree_datamap.values():
             if not track.have_fcc_status():
-                track.fcc_status = fcc_song_check(track.artist, track.title)
+                track.fcc_status = FCCChecker.fcc_song_check(track.artist, track.title)
                 row_values = self.tree.item(track.id)["values"]
-                row_values = (*row_values[0:5], track.fcc_status)
+                row_values = (*row_values[0:5], track.fcc_status_glyph())
                 self.tree.item(track.id, values=row_values)
-                self.is_dirty = True
+                self._set_dirty(True)
 
             
     # import audio files from a directory.
@@ -1175,7 +1165,7 @@ class AudioPlaylistApp(BaseTk):
                 new_files = True
 
         if new_files:
-            self.is_dirty = True
+            self._set_dirty(True)
             self._renumber_rows()
 
     def update_playlist(self):
@@ -1250,7 +1240,7 @@ class AudioPlaylistApp(BaseTk):
                     t = self.tree_datamap[item]
                     f.write(f"{t.file_path}\n")
 
-            self.is_dirty = False
+            self._set_dirty(False)
         except Exception as e:
             logit(f"[Save] Error: {e}")
             traceback.logit_exc()
@@ -1298,10 +1288,12 @@ class AudioPlaylistApp(BaseTk):
                 if track:
                     track_start = HMS_from_seconds(total_secs)
                     #track_duration = HMS_from_seconds(seconds)
-                    track.id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status))
+                    track.id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status_glyph()))
                     self.tree_datamap[track.id] = track
                     total_secs = total_secs + track.duration
                     idx = idx + 1
+
+            logit(f"Imported {idx} tracks.")
 
 
     def import_m3u(self, fp):
@@ -1329,7 +1321,7 @@ class AudioPlaylistApp(BaseTk):
                             track = Track(-1, artist, title, '', line, None)
                             track_start = HMS_from_seconds(total_secs)
                             track_duration = HMS_from_seconds(track.duration)
-                            id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status))
+                            id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status_glyph()))
                             track.id = id
                             self.tree_datamap[id] = track
                             infoAr = []
@@ -1397,7 +1389,7 @@ class AudioPlaylistApp(BaseTk):
                     break
 
             row_values = self.tree.item(track.id)["values"]
-            row_values = (*row_values[0:2], track.artist, track.title, track.album, track.fcc_status)
+            row_values = (*row_values[0:2], track.artist, track.title, track.album, track.fcc_status_glyph())
             self.tree.item(track.id, values=row_values)
 
 
@@ -1491,7 +1483,6 @@ class AudioPlaylistApp(BaseTk):
                 pass
 
             # Natural end -> play next (unless stopped)
-            print("check play next")
             self._set_title("")
             if not self._stop_playback.is_set():
                 self.after(120, self._play_next_track)
@@ -1501,7 +1492,6 @@ class AudioPlaylistApp(BaseTk):
 
     def stop_audio(self):
         if self._play_thread and self._play_thread.is_alive():
-            print("set stop_playback")
             self._stop_playback.set()
             self._play_thread.join(timeout=1.0)
 
@@ -1522,14 +1512,17 @@ class AudioPlaylistApp(BaseTk):
             self.tree.see(next_item)
             self._play_index(idx + 1)
 
-    def _set_title(self, title_str=''):
-        print(f"_set_title: {title_str}")
+    def _set_dirty(self, is_dirty):
+        self.is_dirty = is_dirty
+        self._set_title()
 
+    def _set_title(self, title_str=''):
         self.app_title = self.DEFAULT_TITLE
         if len(title_str) > 0:
             self.app_title = title_str
         elif len(self.playlist_file) > 0:
-            self.app_title = f'{self.DEFAULT_TITLE} - {pathlib.Path(self.playlist_file).stem}'
+            suffix = '*' if self.is_dirty else ''
+            self.app_title = f'{self.DEFAULT_TITLE} - {pathlib.Path(self.playlist_file).stem}{suffix}'
 
         self.title(self.app_title)
 
@@ -1565,6 +1558,6 @@ class AudioPlaylistApp(BaseTk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
-    #app.load_playlist("/Users/barbara/Music/test.csv") ##################
+    #app.load_playlist("/Users/barbara/Documents/boneyard_jan10.csv") ##################
     app.mainloop()
 

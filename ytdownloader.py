@@ -15,6 +15,7 @@ from tkinter import messagebox
 from tkinterdnd2 import *
 from audio_trimmer import trim_audio
 import pyaudio, wave
+from djutils import logit
 
 from track_downloader import TrackDownloader
 
@@ -24,12 +25,6 @@ STAGING_DIR = YTDL_DOWNLOAD_DIR + "/staging"
 # naming fixes:
 # Folk Alley Sessions: Anna Egge Girls..
 # Cristina Vane Getting High in Hotel Rooms
-
-def logit(msg):
-    timestr = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S: ")
-    with open('/tmp/ytdl_log.txt', 'a') as logfile:
-        logfile.write(timestr + msg + '\n')
-
 
 class PlayerThread(threading.Thread):
     def __init__(self, idx, filelist):

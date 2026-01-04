@@ -3,6 +3,7 @@ import os, sys
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import lyricsgenius
+from djutils import logit
 
 
 def get_spotify_info(artist, title):
@@ -27,6 +28,8 @@ def get_spotify_info(artist, title):
     normalized_title = track["name"]
     normalized_artist = track["artists"][0]["name"]
     is_explicit = track['explicit']
+    if is_explicit:
+        logit(f'Spotify explicit: {artist}: {title}')
 
     return (is_explicit, normalized_artist, normalized_title)
 
@@ -41,23 +44,28 @@ def get_lyrics_genius(normalized_artist: str, normalized_title: str) -> str:
 
     return song.lyrics if song else None
 
-def fcc_song_check(artist, title):
-    BAD_WORDS = ["shit", "fuck"]
+class FCCChecker():
+    FCC_STATUS_AR = ['CLEAN', 'DIRTY', 'NOT_FOUND', '-']
 
-    spotify_tuple = get_spotify_info(artist, title)
-    if spotify_tuple and spotify_tuple[0]:
-        return 'DIRTY'
-
-    lyrics = get_lyrics_genius(artist, title)
-    if lyrics:
-        lyrics = lyrics.lower()
-        for word in BAD_WORDS:
-            if word in lyrics:
-                return 'DIRTY'
-
-        return 'CLEAN'
-    else:
-        return 'UNKNOWN'
+    @staticmethod
+    def fcc_song_check(artist, title):
+        BAD_WORDS = ["shit", "fuck", "asshole"]
+    
+        spotify_tuple = get_spotify_info(artist, title)
+        if spotify_tuple and spotify_tuple[0]:
+            return FCCChecker.FCC_STATUS_AR[1]
+    
+        lyrics = get_lyrics_genius(artist, title)
+        if lyrics:
+            lyrics = lyrics.lower()
+            for word in BAD_WORDS:
+                if word in lyrics:
+                    logit(f'Genius explicit: {artist}: {title}, {word}')
+                    return FCCChecker.FCC_STATUS_AR[1]
+    
+            return FCCChecker.FCC_STATUS_AR[0]
+        else:
+            return FCCChecker.FCC_STATUS_AR[2]
 
 if __name__ == "__main__":
    if len(sys.argv) != 3:
@@ -66,6 +74,6 @@ if __name__ == "__main__":
    else:
         artist_name = sys.argv[1]
         song_title = sys.argv[2]
-        status = fcc_song_check(artist_name, song_title)
+        status = FCCChecker.fcc_song_check(artist_name, song_title)
         print(f'{song_title}: {status}')
 

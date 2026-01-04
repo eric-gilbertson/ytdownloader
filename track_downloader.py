@@ -4,11 +4,12 @@ import threading, subprocess, shutil, re, os
 from pathlib import Path
 from tkinter import simpledialog
 import tkinter as tk
-from m3uToPlaylist import getTracksYouTube
 from tkinter import messagebox
+from ytmusicapi import YTMusic
 
 
 from audio_trimmer import trim_audio
+from djutils import logit
 
 FIELD_SEPARATOR = '^'
 
@@ -22,10 +23,8 @@ class CommandThread(threading.Thread):
         self.stderr = None
 
     def run(self):
-        print("start thread")
         self.process = subprocess.Popen(self.cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         (self.stdout, self.stderr) = self.process.communicate()
-        print("done thread")
         self.done_callback()
         pass
 
@@ -57,11 +56,13 @@ class TrackDownloader():
 
 
     def fetch_track(self, parent, track_specifier, use_fullname):
-        ARTIST_TRACK_SEPARATOR = ';'
+        logit(f"Enter fetch_track: {track_specifier}")
+        ARTIST_TRACK_SEPARATOR = r'[;\t]' # split on ; and <tab>
         artistTerm = '%(artist)s' if use_fullname  else 'UNKNOWN'
         out_file = '"{}/{}_%(title)s.%(ext)s"'.format(self.download_dir, artistTerm)
+        self.track_album = ''
 
-        track_specifier_ar = track_specifier.split(ARTIST_TRACK_SEPARATOR)
+        track_specifier_ar = re.split(ARTIST_TRACK_SEPARATOR, track_specifier)
         # use_fullname is false when the first try fails because the artist name was too long
         # for the filename. if a second try then skip the track lookup and use the previous URL.
         if use_fullname  and len(track_specifier_ar) == 2:
@@ -103,7 +104,7 @@ class TrackDownloader():
             if idx1 > 13 and idx2 > idx1:
                 self.errMsg = ''
                 self.track.track_file =  stdOut[idx1:idx2+4]
-                print("Downloaded file: " + self.track.track_file)
+                logit("Downloaded file: " + self.track.track_file)
                 self.track.album = self.track_album
                 (self.track.track_file, self.track.artist, self.track.title)  = self.clean_filepath(self.track.track_file)
                 trim_audio(self.track.track_file)
@@ -185,14 +186,10 @@ class TrackDownloader():
         new_file = f"{os.path.dirname(filepath)}/{new_name}{name_extension}"
 
         if new_file != filepath:
-            print("Rename: {}, {}".format(filepath, new_file))
             os.rename(filepath, new_file)
     
         Path(new_file).touch()
         return (new_file, artist, title)
-
-    def trim_audio(self):
-        print("trim_audio")
 
     def edit_track(self, parent, track):
         dialog = TrackEditDialog(parent, "Edit Track",
@@ -216,7 +213,6 @@ class TrackDownloader():
             #self.tree.item(track.id, values=row_values)
             return True
         else:
-            print("Canceled or no input provided.")
             return False
 
 
@@ -327,6 +323,73 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_album = self.album_entry.get()
 
 
+def getTitlesYouTube(artist, track):
+    yt = YTMusic()
+            
+    if track.endswith(".mp3") or track.endswith(".wav"):
+        track = track[0:-4] 
+        
+    search_key = '"' + artist + '" "' + track + '"'
+    
+    # search types: songs, videos, albums, artists, playlists, community_playlists, featured_playlists, uploads
+    search_results = yt.search(search_key, "albums")
+    
+    choices =[] 
+    releases = []
+    artist_lc = artist.lower()
+    releaseTitle = None
+    singleTitle = None
+    for item in search_results:
+        artists = ''
+        for artist_row in item.get('artists', []):
+            artists = artist_row['name'] + ', '
+    
+        if artists.lower().find(artist_lc) >= 0:
+            releaseTitle = item['title']
+            #key = '{} -\t {}'.format(artists, releaseTitle)
+            if releaseTitle not in releases:
+                choices.append(releaseTitle)
+                releases.append(releaseTitle)
+
+    if len(choices) == 0:
+        logit(f"YouTube search for {track} by {artist} found {len(choices)} items")
+
+    return choices
+
+def getTracksYouTube(artist, track):
+    yt = YTMusic()
+
+    if track.endswith(".mp3") or track.endswith(".wav"):
+        track = track[0:-4]
+
+    track = track.strip()
+    artist = artist.strip()
+    search_key = '"' + artist + '" "' + track + '"'
+
+    # search types: songs, videos, albums, artists, playlists, community_playlists, featured_playlists, uploads
+    search_results = yt.search(search_key, 'songs')
+    #print("YouTube search for -{}- found {} items".format(search_key, len(search_results)))
+
+    choices =[]
+    releases = []
+    artist_lc = artist.lower()
+    releaseTitle = None
+    singleTitle = None
+    for item in search_results:
+        artists = ''
+        for artist_row in item.get('artists', []):
+            artists = artist_row['name'] + ', '
+
+        #print("item: {}, {}".format(artists, item['title']))
+
+        if artists.lower().find(artist_lc) >= 0:
+            releaseTitle = item['title']
+            #key = '{} -\t {}'.format(artists, releaseTitle)
+            if releaseTitle not in releases and 'videoId' in item:
+                choices.append(item)
+                releases.append(releaseTitle)
+
+    return choices
 
 #downloader = TrackDownloader("/tmp")
 #downloader.fetch_track("https://www.youtube.com/watch?v=20cuFhgPLEo", True)
