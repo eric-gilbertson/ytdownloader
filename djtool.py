@@ -251,47 +251,38 @@ class UserConfigurationDialog(simpledialog.Dialog):
         self.configuration.save_config()
 
 class TrackEditDialog(simpledialog.Dialog):
-    def __init__(self, parent, hdr_title=None, track_artist="", track_title="", track_album="", fcc_status=""):
-
-        # store initial values
-        self.initial_artist = track_artist
-        self.initial_title = track_title
-        self.initial_album = track_album
-        self.initial_fcc_status = fcc_status
-
+    def __init__(self, parent, track):
         self.ok_clicked = False
+        self.track_artist = track.artist
+        self.track_title  = track.title
+        self.track_album = track.album
+        self.track_fcc_status = track.fcc_status
+        self.track_fcc_comment = track.fcc_comment
 
-        self.track_artist = ""
-        self.track_title  = ""
-        self.track_album = ""
-        self.track_fcc_status = ""
-
-        super().__init__(parent, hdr_title)
+        super().__init__(parent, "Edit Track")
 
     def body(self, master):
-        #self.transient(master)  # stay on top of parent
-        #self.grab_set_global()              # capture all events to this dialog
-
         # Create labels
         tk.Label(master, text="Artist:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
         tk.Label(master, text="Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
         tk.Label(master, text="Album:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
         tk.Label(master, text="FCC:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
+        tk.Label(master, text=self.track_fcc_comment).grid(row=4, column=1, sticky="w", padx=0, pady=0)
 
         # Create entry fields with initial values
         self.artist_entry = tk.Entry(master, width=40)
-        self.artist_entry.insert(0, self.initial_artist)
+        self.artist_entry.insert(0, self.track_artist)
 
         self.title_entry = tk.Entry(master, width=40)
-        self.title_entry.insert(0, self.initial_title)
+        self.title_entry.insert(0, self.track_title)
 
         self.album_entry = tk.Entry(master, width=40)
-        self.album_entry.insert(0, self.initial_album)
+        self.album_entry.insert(0, self.track_album)
 
         self.fcc_status_combo = ttk.Combobox(master, state="readonly", width=20)
-        self.fcc_status_combo.insert(0, self.initial_fcc_status)
+        self.fcc_status_combo.insert(0, self.track_fcc_status)
         self.fcc_status_combo['values'] = FCCChecker.FCC_STATUS_AR
-        self.fcc_status_combo.set(self.initial_fcc_status)
+        self.fcc_status_combo.set(self.track_fcc_status)
 
         # Place widgets
         self.artist_entry.grid(row=0, column=1, padx=5, pady=5)
@@ -313,7 +304,7 @@ class TrackEditDialog(simpledialog.Dialog):
 class Track():
     FCC_STATUS_IMAGE = {"CLEAN" : '✅', 'DIRTY': '⛔', 'NOT_FOUND': '✋'}
 
-    def __init__(self, id, fcc_status, artist, title, album,  file_path, duration):
+    def __init__(self, id=-1, fcc_status='', artist='', title='', album='',  file_path='', duration=0):
         super().__init__()
         self.id = id
         self.title = '-' if len(title) == 0 else title
@@ -322,15 +313,14 @@ class Track():
         self.file_path = file_path
         self.duration = duration # seconds
         self.fcc_status = '-' if len(fcc_status) == 0 else fcc_status
+        self.fcc_comment = ''
 
-        if duration:
-            self.duration = duration
-        else:
-           self.duration = 0 if is_stop_file(title) else len(AudioSegment.from_file(file_path))/1000
+        if duration <= 0 and os.path.exists(file_path):
+           self.duration = len(AudioSegment.from_file(file_path))/1000
 
-    def to_csv(self):
-        line = f"{self.fcc_status}\t{self.artist}\t{self.title}\t{self.album}\t{self.file_path}\n"
-        return line
+    def to_dict(self):
+        dict = self.__dict__
+        return dict
 
     def have_fcc_status(self):
         have_status = len(self.fcc_status) > 0 and self.fcc_status != '-'
@@ -341,23 +331,11 @@ class Track():
         return glyph
 
     @staticmethod
-    def from_csv(csv_line):
-        FILE_IDX = 4
+    def from_dict(track_dict):
+        track = Track()
+        for key, val in track_dict.items():
+            setattr(track, key, val)
 
-        lineAr = csv_line.strip().split('\t')
-        if (len(lineAr) <= 4) or (not is_stop_file(lineAr[FILE_IDX]) and not os.path.exists(lineAr[FILE_IDX])):
-             logit(f"skipping file: {len(lineAr)}, {csv_line}")
-             return None
-
-        seconds = -1
-        fcc_status = lineAr[0]
-        artist = lineAr[1]
-        title = lineAr[2]
-        album = lineAr[3]
-        file = lineAr[FILE_IDX]
-        seconds = int(lineAr[FILE_IDX+1]) if len(lineAr) > FILE_IDX + 1 else None
-
-        track = Track(-1, fcc_status, artist, title, album, file, seconds)
         return track
 
 class ZKPlaylist():
@@ -811,7 +789,7 @@ class AudioPlaylistApp(BaseTk):
         artist = track.artist
         title = track.title
         album = track.album
-        dialog = TrackEditDialog(self, "Edit Track", artist, title, album, track.fcc_status)
+        dialog = TrackEditDialog(self, track)
     
         if dialog.ok_clicked:
             self._set_dirty(True)
@@ -1057,7 +1035,7 @@ class AudioPlaylistApp(BaseTk):
         elif is_pause_file(title):
             tags = ("pause")
 
-        track = Track(-1, '', artist, title, album, path, None)
+        track = Track(-1, '', artist, title, album, path, -1)
         track.id = self.tree.insert("", insert_index, values=(insert_index+1, track.duration, artist, title, album, track.fcc_status), tags=tags)
         self.tree_datamap[track.id] = track
     
@@ -1136,7 +1114,9 @@ class AudioPlaylistApp(BaseTk):
     def fcc_check(self):
         for track in self.tree_datamap.values():
             if not track.have_fcc_status():
-                track.fcc_status = FCCChecker.fcc_song_check(track.artist, track.title)
+                status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
+                track.fcc_status = status
+                track.fcc_comment = comment
                 row_values = self.tree.item(track.id)["values"]
                 row_values = (*row_values[0:5], track.fcc_status_glyph())
                 self.tree.item(track.id, values=row_values)
@@ -1178,54 +1158,51 @@ class AudioPlaylistApp(BaseTk):
 
     def save_playlist(self):
         fp = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV", "*.csv")],
+                defaultextension=".json",
+                filetypes=[("JSON", "*.json")],
                 title="Save Playlist As")
 
         if fp:
             self.do_playlist_save(fp)
 
     def do_playlist_save(self, fp):
-        if not self.tree.get_children(""):
-            logit("[Save] No files to save.")
-            return
-
         if not fp:
             return
 
         self.playlist_file = fp
         try:
+            time_secs = 0
+            include_timestamps = False
+            tracks = []
+            for item in self.tree.get_children(""):
+                t = self.tree_datamap[item]
+                tracks.append(t.to_dict())
+                file_name = os.path.basename(t.file_path).lower()
+                if self._is_audio_file(file_name):
+                   include_timestamps = True
+
+            # write app playlist
+            with open(fp, 'w', encoding='utf-8') as json_file:
+                json.dump(tracks, json_file, indent=4, ensure_ascii=False)
+
+            # write Zookeeper playlist
             zk_tag = zk_label  = '-'
             zk_filename = f'{fp[0:-4]}_zk.csv'
             zk_file = open(zk_filename, "w", encoding="utf-8")
- 
-            time_secs = 0
-            with open(fp, "w", encoding="utf-8") as f:
-                include_timestamps = False
-                for item in self.tree.get_children(""):
-                    t = self.tree_datamap[item]
-                    file_name = os.path.basename(t.file_path).lower()
-                    if self._is_audio_file(file_name):
-                        include_timestamps = True
-                        break
-             
-                    
-                zk_track_start = '\n' 
-                for item in self.tree.get_children(""):
-                    t = self.tree_datamap[item]
-                    file_name = os.path.basename(t.file_path)
-                    track_start = HMS_from_seconds(time_secs)
-                    line = t.to_csv()
-                    f.write(line)
+            zk_track_start = '\n'
+            for item in self.tree.get_children(""):
+                t = self.tree_datamap[item]
+                file_name = os.path.basename(t.file_path)
+                track_start = HMS_from_seconds(time_secs)
 
-                    if include_timestamps:
-                        zk_track_start = f'{track_start}\n'
+                if include_timestamps:
+                    zk_track_start = f'{track_start}\n'
 
-                    if self._is_audio_file(file_name):
-                        # zookeeper needs all blanks for a break
-                        zk_line = f"\t\t\t\t\t{zk_track_start}"
-                    else:
-                        zk_line = f"{t.artist}\t{t.title}\t{t.album}\t{zk_label}\t{zk_tag}\t{zk_track_start}"
+                if self._is_audio_file(file_name):
+                    # zookeeper needs all blanks for a break
+                    zk_line = f"\t\t\t\t\t{zk_track_start}"
+                else:
+                    zk_line = f"{t.artist}\t{t.title}\t{t.album}\t{zk_label}\t{zk_tag}\t{zk_track_start}"
 
                     if not self._is_spot_file(file_name):
                         zk_file.write(zk_line)
@@ -1233,12 +1210,6 @@ class AudioPlaylistApp(BaseTk):
                     time_secs = time_secs + t.duration
 
             zk_file.close()
-
-            fp = fp.replace(".csv", ".m3u")
-            with open(fp, "w", encoding="utf-8") as f:
-                for item in self.tree.get_children(""):
-                    t = self.tree_datamap[item]
-                    f.write(f"{t.file_path}\n")
 
             self._set_dirty(False)
         except Exception as e:
@@ -1249,7 +1220,7 @@ class AudioPlaylistApp(BaseTk):
 
     def load_playlist(self, fp=False):
         if not fp:
-            fp = filedialog.askopenfilename(filetypes=[("M3U Playlist", "*.m3u"), ('CSV Playlist', "*.csv")], title="Load Playlist")
+            fp = filedialog.askopenfilename(filetypes=[('JSON Playlist', "*.json")], title="Load Playlist")
         if not fp:
             return
 
@@ -1258,17 +1229,11 @@ class AudioPlaylistApp(BaseTk):
             self.tree.delete(item)
             self.tree_datamap = {}
 
-        if fp.endswith("m3u"):
-            self.import_m3u(fp)
-        else:
-            self.import_csv(fp)
-
+        self.import_json(fp)
         self.playlist_file = fp
         self._set_title()
 
-    # imports files using Zookeeper form:
-    # artist  track  album  tag   label  timestamp	file
-    def import_csv(self, fp):
+    def import_json(self, fp):
         total_secs = 0
         idx = 1
 
@@ -1281,54 +1246,26 @@ class AudioPlaylistApp(BaseTk):
         if start_hour >= 0:
             total_secs = start_hour * 60 * 60
 
-        with open(fp, "r", encoding="utf-8") as f:
-            idx = 1
-            for line in f:
-                track = Track.from_csv(line)
-                if track:
-                    track_start = HMS_from_seconds(total_secs)
-                    #track_duration = HMS_from_seconds(seconds)
-                    track.id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status_glyph()))
-                    self.tree_datamap[track.id] = track
-                    total_secs = total_secs + track.duration
-                    idx = idx + 1
-
-            logit(f"Imported {idx} tracks.")
-
-
-    def import_m3u(self, fp):
+        logit(f"Start JSON import from: {fp}")
         try:
-            infoAr = []
-            total_secs = 0
-            idx = 1
-            with open(fp, "r", encoding="utf-8") as f:
-                for idx, line in enumerate(f, start=1):
-                    line = line.strip()
-                    if line.startswith("#EXTINF:"):
-                        infoAr =  line.split(":")[1].split(',')
-                    elif line.endswith((".mp3", ".wav")):
-                        if line.startswith("file:///"):
-                            line = unquote(line[7:])
-
-                        if os.path.exists(line):
-                            artist = ''
-                            title = os.path.basename(line)
-                            titleAr = title.split('^')
-                            if len(titleAr) > 1:
-                                artist = titleAr[0]
-                                title = titleAr[1]
-
-                            track = Track(-1, artist, title, '', line, None)
-                            track_start = HMS_from_seconds(total_secs)
-                            track_duration = HMS_from_seconds(track.duration)
-                            id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status_glyph()))
-                            track.id = id
-                            self.tree_datamap[id] = track
-                            infoAr = []
-                            total_secs = total_secs + track.duration
-
+            with open(fp, 'r') as file:
+                track_objs = json.load(file)
+                idx = 1
+                for track_obj in track_objs:
+                    track = Track.from_dict(track_obj)
+                    if track:
+                        track_start = HMS_from_seconds(total_secs)
+                        track.id = self.tree.insert("", "end", values=(idx, track_start, track.artist, track.title, track.album, track.fcc_status_glyph()))
+                        self.tree_datamap[track.id] = track
+                        total_secs = total_secs + track.duration
+                        idx = idx + 1
+    
+            logit(f"Imported {idx} tracks.")
         except Exception as e:
-            logit(f"[Load] Error: {e}")
+            msg = (f"Error processing {fp}, {e}")
+            logit(msg)
+            tk.messagebox.showwarning(title="File Import Error", message=msg)
+
 
     # ======================= PLAYBACK =======================
     def _toggle_play_pause(self):
@@ -1528,10 +1465,6 @@ class AudioPlaylistApp(BaseTk):
 
     # ----- Countdown updates -----
     def _set_countdown(self, time_str):
-#        if time_str == '':
-#            print("clear title")
-#            self.app_title = "DJ Tool"
-
         self.title(f"{self.app_title} {time_str}")
 
     def  _start_countdown_updates(self):
@@ -1558,6 +1491,6 @@ class AudioPlaylistApp(BaseTk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
-    #app.load_playlist("/Users/barbara/Documents/boneyard_jan10.csv") ##################
+    #app.load_playlist("/Users/barbara/Documents/dropkick.json") ##################
     app.mainloop()
 

@@ -28,10 +28,7 @@ def get_spotify_info(artist, title):
     normalized_title = track["name"]
     normalized_artist = track["artists"][0]["name"]
     is_explicit = track['explicit']
-    if is_explicit:
-        logit(f'Spotify explicit: {artist}: {title}')
-
-    return (is_explicit, normalized_artist, normalized_title)
+    return is_explicit
 
 #os.environ["GENIUS_ACCESS_TOKEN"],
 def get_lyrics_genius(normalized_artist: str, normalized_title: str) -> str:
@@ -51,21 +48,24 @@ class FCCChecker():
     def fcc_song_check(artist, title):
         BAD_WORDS = ["shit", "fuck", "asshole"]
     
-        spotify_tuple = get_spotify_info(artist, title)
-        if spotify_tuple and spotify_tuple[0]:
-            return FCCChecker.FCC_STATUS_AR[1]
-    
         lyrics = get_lyrics_genius(artist, title)
         if lyrics:
             lyrics = lyrics.lower()
             for word in BAD_WORDS:
                 if word in lyrics:
-                    logit(f'Genius explicit: {artist}: {title}, {word}')
-                    return FCCChecker.FCC_STATUS_AR[1]
+                    msg = f'Genius explicit: {word}'
+                    logit(msg)
+                    return FCCChecker.FCC_STATUS_AR[1], msg
     
-            return FCCChecker.FCC_STATUS_AR[0]
-        else:
-            return FCCChecker.FCC_STATUS_AR[2]
+            return FCCChecker.FCC_STATUS_AR[0], ''
+
+        explicit = get_spotify_info(artist, title)
+        if explicit:
+            msg = f'Spotify explicit flag'
+            logit(msg)
+            return FCCChecker.FCC_STATUS_AR[1], msg
+
+        return FCCChecker.FCC_STATUS_AR[2], ''
 
 if __name__ == "__main__":
    if len(sys.argv) != 3:
