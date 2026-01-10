@@ -46,8 +46,8 @@ class FCCChecker():
 
     @staticmethod
     def fcc_song_check(artist, title):
-        BAD_WORDS = ["shit", "fuck", "asshole"]
-    
+        BAD_WORDS = ["shit", "fuck", "asshole", 'nigger']
+
         lyrics = get_lyrics_genius(artist, title)
         if lyrics:
             lyrics = lyrics.lower()

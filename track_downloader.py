@@ -9,6 +9,7 @@ from ytmusicapi import YTMusic
 
 
 from audio_trimmer import trim_audio
+from models import Track
 from djutils import logit
 
 FIELD_SEPARATOR = '^'
@@ -28,16 +29,6 @@ class CommandThread(threading.Thread):
         self.done_callback()
         pass
 
-class Track():
-    def __init__(self, id, artist, title, album,  track_file, duration):
-        super().__init__()
-        self.id = id
-        self.title = title
-        self.artist = artist
-        self.album = album
-        self.track_file = track_file
-        self.duration = duration # seconds
-
 class TrackDownloader():
     def __init__(self, download_dir):
         self.YTDL_PATH = shutil.which('yt-dlp')
@@ -45,7 +36,7 @@ class TrackDownloader():
         self.download_thread = None
         self.name_too_long = False
         self.err_msg = ''
-        self.track = Track('', '', '', '', '', 0)
+        self.track = Track(-1, '', '', '', '', '', '', 0)
         self.track_url = ''
         self.track_file = None
         self.track_album = ''
@@ -57,7 +48,8 @@ class TrackDownloader():
 
     def fetch_track(self, parent, track_specifier, use_fullname):
         logit(f"Enter fetch_track: {track_specifier}")
-        ARTIST_TRACK_SEPARATOR = r'[;\t]' # split on ; and <tab>
+        is_url = 'https:/' in track_specifier
+        ARTIST_TRACK_SEPARATOR = r'[-;\t]' # split on ; and <tab>
         artistTerm = '%(artist)s' if use_fullname  else 'UNKNOWN'
         out_file = '"{}/{}_%(title)s.%(ext)s"'.format(self.download_dir, artistTerm)
         self.track_album = ''
@@ -65,7 +57,7 @@ class TrackDownloader():
         track_specifier_ar = re.split(ARTIST_TRACK_SEPARATOR, track_specifier)
         # use_fullname is false when the first try fails because the artist name was too long
         # for the filename. if a second try then skip the track lookup and use the previous URL.
-        if use_fullname  and len(track_specifier_ar) == 2:
+        if not is_url and use_fullname  and len(track_specifier_ar) == 2:
             artist = track_specifier_ar[0]
             title = track_specifier_ar[1]
             tracks = getTracksYouTube(artist, title)
@@ -271,11 +263,10 @@ class SelectTrackDialog(simpledialog.Dialog):
         if line_number >= len(self.track_choices):
             return
 
-        self.ok_clicked = True
-        self.track_id = self.track_choices[line_number]['videoId']
-        self.album = self.track_choices[line_number]['album']['name']
-        self.destroy()
-    
+        self.choice_entry.delete(0, tk.END)
+        self.choice_entry.insert(0, str(line_number+1))
+        self.ok()
+
 class TrackEditDialog(simpledialog.Dialog):
     def __init__(self, parent, hdr_title=None, track_artist="", track_title="", track_album=""):
 

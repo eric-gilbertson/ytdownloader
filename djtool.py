@@ -21,6 +21,7 @@ from multiprocessing.process import parent_process
 from os.path import expanduser
 import time
 
+from commondefs import *
 from fcc_checker import FCCChecker
 import json, re, datetime, yaml
 import math, os, shlex, socket, ssl, threading, traceback
@@ -30,15 +31,10 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import pyaudio
 from pydub import AudioSegment
+
+from models import Track
 from track_downloader import TrackDownloader, getTitlesYouTube
 from djutils import logit
-
-# download directory to the staging dir
-YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl/staging"
-ZOOKEEPER_TIMEOUT_SECONDS = 5
-
-PAUSE_FILE = 'PAUSE'
-MIC_BREAK_FILE = 'MIC_BREAK'
 
 # ---------- Optional DnD (Finder drag/drop) ----------
 try:
@@ -49,21 +45,6 @@ except Exception:
     BaseTk = tk.Tk
     DND_FILES = None
     DND_AVAILABLE = False
-
-def is_stop_file(file_name):
-    return file_name == PAUSE_FILE or file_name == MIC_BREAK_FILE
-
-def is_mic_break_file(file_name):
-    return file_name == MIC_BREAK_FILE
-
-def is_pause_file(file_name):
-    return file_name == PAUSE_FILE
-
-def HMS_from_seconds(seconds):
-    minutes, secs = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    hms_str = f'{math.floor(hours):d}:{math.floor(minutes):02d}:{math.floor(secs):02d}'
-    return hms_str
 
 def seconds_from_HMS(time_hms):
     seconds = 0
@@ -147,8 +128,15 @@ class UserConfiguration():
         self.show_start_time = config_dict.get('show_start_time', 0)
         self.zookeeper_url = config_dict.get('zookeeper_url', 'https://zookeeper.stanford.edu')
         self.zookeeper_api = config_dict.get('zookeeper_api', '')
+        self.apikey = config_dict.get('api_key', '')
+        self.genius_api = config_dict.get('genius_api', '')
+        self.spotify_id = config_dict.get('spotify_id', '')
+        self.spotify_secret = config_dict.get('spotify_secret', '')
 
-    
+    def have_apikeys(self):
+        retval = self.zookeeper_api and self.genius_api and self.spotify_id and self.spotify_secret
+        return retval
+
     def to_dict(self):
         dict = {
             'show_title' : self.show_title,
@@ -180,6 +168,28 @@ class UserConfiguration():
         except IOError:
             logit("Error saving configuration file: {ex}")
 
+    def set_apikeys(self):
+        if not self.have_apikeys():
+            if not self.apikey:
+                tk.messagebox.showwarning(title="Info",
+                                          message="API keys not found. Not all functions will be available")
+            else:
+                try:
+                    ssl_context = ssl._create_unverified_context()
+                    # req = urllib.request.Request('https://kzsu/stanford.edu/internal/apikeys') #####
+                    req = urllib.request.Request('http://localhost:5000/internal/helpertokens/')
+                    req.add_header("Content-type", "application/vnd.api+json")
+                    req.add_header("Accept", "text/plain")
+                    req.add_header("X-APIKEY", self.apikey)
+                    with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:
+
+                        resp_obj = json.loads(response.read())
+                        self.spotify_id = resp_obj.get('spotify_id', None)
+                        self.spotify_secret = resp_obj.get('spotify_secret', None)
+                        self.genius_api = resp_obj.get('genius_apikey', None)
+                        self.zookeeper_api = resp_obj.get('zookeeper_apikey', None)
+                except Exception as e:
+                    logit(f"Exception geting apikeys, {e}")
 
 
 class LiveShowDialog(simpledialog.Dialog):
@@ -301,133 +311,6 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_fcc_status = self.fcc_status_combo.get()
 
 
-class Track():
-    FCC_STATUS_IMAGE = {"CLEAN" : '✅', 'DIRTY': '⛔', 'NOT_FOUND': '✋'}
-
-    def __init__(self, id=-1, fcc_status='', artist='', title='', album='',  file_path='', duration=0):
-        super().__init__()
-        self.id = id
-        self.title = '-' if len(title) == 0 else title
-        self.artist = '-' if len(artist) == 0 else artist
-        self.album = '-' if len(album) == 0 else album
-        self.file_path = file_path
-        self.duration = duration # seconds
-        self.fcc_status = '-' if len(fcc_status) == 0 else fcc_status
-        self.fcc_comment = ''
-
-        if duration <= 0 and os.path.exists(file_path):
-           self.duration = len(AudioSegment.from_file(file_path))/1000
-
-    def to_dict(self):
-        dict = self.__dict__
-        return dict
-
-    def have_fcc_status(self):
-        have_status = len(self.fcc_status) > 0 and self.fcc_status != '-'
-        return have_status
-
-    def fcc_status_glyph(self):
-        glyph = self.FCC_STATUS_IMAGE.get(self.fcc_status, self.fcc_status)
-        return glyph
-
-    @staticmethod
-    def from_dict(track_dict):
-        track = Track()
-        for key, val in track_dict.items():
-            setattr(track, key, val)
-
-        return track
-
-class ZKPlaylist():
-    def __init__(self, parent):
-        super().__init__()
-
-        self.parent = parent
-        self.track_idx = 0
-        self.id = None
-        self.start_hour = 0.0
-        self.end_hour = 0.0
-        self.ssl_context = ssl._create_unverified_context()
-
-    # return true if playlist is active and within start/end window
-    def _is_active(self):
-        is_active = False
-        if self.id:
-            now_date = datetime.datetime.now()
-            now_hour = now_date.hour + now_date.minute / 60
-            if self.end_hour > self.start_hour:
-                is_active = self.start_hour <= now_hour  <= self.end_hour
-            else:
-                is_active = now_hour >= self.start_hour or now_hour < self.end_hour
-
-        return is_active
-
-    def send_track(self, track):
-        start_time = time.time_ns()
-        if not self.id or not self._is_active() or is_pause_file(track.title) or track.title.startswith("LID_"):
-            logit(f"abort send_track {self.id}")
-            return
-
-        url = self.parent.configuration.zookeeper_url + f'/api/v2/playlist/{self.id}/events'
-        method = "POST" # timestamp this track
-        event_type = 'break' if is_mic_break_file(track.title) else 'spin'
-        event =  {
-            "type": "event",
-            "attributes": {
-                "type": event_type,
-                "created": "auto",
-                "artist": track.artist,
-                "track": track.title,
-                "album": track.album,
-                "label": '-'
-             }
-        }
-
-        data = {"data" : event}
-        data_json = json.dumps(data)
-        req = urllib.request.Request(url, method=f'{method}')
-        req.add_header("Content-type", "application/vnd.api+json")
-        req.add_header("Accept", "text/plain")
-        req.add_header("X-APIKEY", self.parent.configuration.zookeeper_api)
-        
-        try:
-            with urllib.request.urlopen(req, data=data_json.encode('utf-8'), timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
-                resp_obj  = json.loads(response.read())
-        except Exception as e:
-            logit(f"Exception posting track: {url}, {e}")
-
-        end_time = time.time_ns()
-        print(f"exit send_track {(end_time - start_time) // 1_000_000}")
-
-    def check_show_playlist(self, target_title):
-        self.id = None
-        now_date = datetime.datetime.now().date().isoformat()
-        url = self.parent.configuration.zookeeper_url + f'/api/v2/playlist?filter[date]={now_date}'
-
-        try:
-            target_title_lc = target_title.lower()
-            with urllib.request.urlopen(url, timeout=ZOOKEEPER_TIMEOUT_SECONDS, context=self.ssl_context) as response:
-                playlists  = json.loads(response.read())['data']
-                for  playlist in playlists:
-                     attrs = playlist['attributes']
-                     if attrs['name'].lower() == target_title_lc:
-                         self.id = playlist['id']
-                         time_ar = attrs['time'].split('-')
-                         self.start_hour = float(time_ar[0][:2]) + (int(time_ar[0][2:4]) / 60.0)
-                         self.end_hour = float(time_ar[1][:2]) + (int(time_ar[1][2:4]) / 60.0)
-                         msg = f'Playlist found. Track spins will be logged to {target_title} between {time_ar[0]} and {time_ar[1]}, {self.id}'
-                         tk.messagebox.showwarning(title="Info", message=msg)
-                         break
-                      
-        except Exception as e:
-            logit(f"Exception getting playlist: {url}, {e})")
-
-        if not self.id:
-            self.parent.live_show.set(False)
-            tk.messagebox.showwarning(title="Error", message=f"Zookeeper playlist '{target_title}' not found.", parent=self.parent)
-          
-        return self.id != None
-
 
 class AudioPlaylistApp(BaseTk):
     def __init__(self):
@@ -452,9 +335,10 @@ class AudioPlaylistApp(BaseTk):
         self._audio_total_ms = 0
         self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
-        self.playlist = ZKPlaylist(self)
+        #self.playlist = ZKPlaylist(self)
         self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
         self.configuration = UserConfiguration.load_config()
+        self.configuration.set_apikeys()
 
         self.bind('<FocusIn>', lambda e: self._on_focus_in())
         self.bind('<FocusOut>', lambda e: self._on_focus_out())
@@ -530,7 +414,8 @@ class AudioPlaylistApp(BaseTk):
     
                 #append track to current list
                 track = self.downloader.track
-                self._insert_track(-1, track.artist, track.title, track.album, track.track_file, True)
+                status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
+                self._insert_track(-1, status, comment, track.artist, track.title, track.album, track.track_file, True)
             else:
                 tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
 
@@ -763,12 +648,12 @@ class AudioPlaylistApp(BaseTk):
     def insert_pause(self):
         print("insert pause")
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '', PAUSE_FILE, '', PAUSE_FILE, True)
+        self._insert_track(insert_index, '', '', '', PAUSE_FILE, '', PAUSE_FILE, True)
 
     def insert_mic_break(self):
         print("insert mic_break")
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '', MIC_BREAK_FILE, '', MIC_BREAK_FILE, True)
+        self._insert_track(insert_index, '','', '', MIC_BREAK_FILE, '', MIC_BREAK_FILE, True)
 
 
     def edit_selected_track(self):
@@ -1004,7 +889,7 @@ class AudioPlaylistApp(BaseTk):
                 continue
 
             (artist, title, album) = self._get_track_info(path)
-            self._insert_track(insert_index, artist, title, album, path, file_count == 0)
+            self._insert_track(insert_index, '', '', artist, title, album, path, file_count == 0)
             insert_index += 1  # subsequent files go after
             file_count = file_count - 1
 
@@ -1025,7 +910,7 @@ class AudioPlaylistApp(BaseTk):
         return (artist, title, album)
 
 
-    def _insert_track(self, insert_index, artist, title, album, path, update_list):
+    def _insert_track(self, insert_index, fcc_status, fcc_comment, artist, title, album, path, update_list):
         if insert_index == -1:
             insert_index = len(self.tree.get_children(""))
 
@@ -1035,7 +920,7 @@ class AudioPlaylistApp(BaseTk):
         elif is_pause_file(title):
             tags = ("pause")
 
-        track = Track(-1, '', artist, title, album, path, -1)
+        track = Track(-1, fcc_status, fcc_comment, artist, title, album, path, -1)
         track.id = self.tree.insert("", insert_index, values=(insert_index+1, track.duration, artist, title, album, track.fcc_status), tags=tags)
         self.tree_datamap[track.id] = track
     
@@ -1141,7 +1026,7 @@ class AudioPlaylistApp(BaseTk):
         for idx, file_path in enumerate(audio_files):
             if not file_path in current_files:
                 (artist, title, album) = self._get_track_info(file_path)
-                self._insert_track(-1, artist, title, album, file_path, False)
+                self._insert_track(-1, '', '', artist, title, album, file_path, False)
                 new_files = True
 
         if new_files:
