@@ -17,10 +17,12 @@ VLC like media player optimized for use in live radio features include:
 """
 import glob
 import pathlib
+import shutil
 from multiprocessing.process import parent_process
 from os.path import expanduser
 import time
 
+import configuration
 from commondefs import *
 from fcc_checker import FCCChecker
 import json, re, datetime, yaml
@@ -32,7 +34,8 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 import pyaudio
 from pydub import AudioSegment
 
-from models import Track
+from dialogs import SelectAlbumDialog, LiveShowDialog, UserConfigurationDialog, TrackEditDialog
+from models import Track, ZKPlaylist, UserConfiguration
 from track_downloader import TrackDownloader, getTitlesYouTube
 from djutils import logit
 
@@ -57,261 +60,6 @@ def seconds_from_HMS(time_hms):
     return seconds
 
 
-class SelectAlbumDialog(simpledialog.Dialog):
-    def __init__(self, parent, artist, track, album_choices):
-        # store initial values
-        self.artist = artist
-        self.track = track
-        self.album_choices = album_choices
-        self.album = ''
-        self.album_choices = album_choices
-        self.ok_clicked = False
-        super().__init__(parent, f'Select Album')
-
-    def body(self, master):
-        self.choices_entry = tk.Text(master, borderwidth=1, relief="solid", width=80)
-        self.choices_entry.bind("<Double-1>", lambda e: self._select_row(e))
-        self.choices_entry.config(cursor="arrow")
-
-        self.choice_entry = tk.Entry(master, width=60)
-        self.track_info = tk.Entry(master, width=60)
-
-        idx = 0
-        albums = ''
-        for title in self.album_choices:
-            albums = albums + f"{idx}: {title}\n"
-            idx = idx + 1
-
-        self.choices_entry.insert("1.0", albums)
-        self.track_info.insert(0, f'{self.artist} - {self.track}')
-
-        if idx > 0:
-            self.choice_entry.insert(0, '0')
-
-        self.choice_entry.focus_set()
- 
-        # Place widgets
-        self.track_info.grid(row=1, column=0, padx=0, pady=5)
-        self.choices_entry.grid(row=2, column=0, padx=0, pady=5)
-        self.choice_entry.grid(row=3, column=0, padx=5, pady=5)
-
-    def apply(self):
-        # When Save is clicked
-        self.ok_clicked = True
-
-        choice = self.choice_entry.get()
-        if len(choice) == 0:
-            self.ok_clicked = False
-            self.album = ''
-        elif len(choice) == 1:
-            choice_num = int(choice)
-            self.album = self.album_choices[choice_num]
-        else:
-            self.album = choice # assume user entered track
-
-    def _select_row(self, event):
-        index = self.choices_entry.index(f"@{event.x},{event.y}")
-        line_number = int(index.split('.')[0]) - 1
-        if line_number >= len(self.album_choices):
-            return
-
-        self.ok_clicked = True
-        self.album = self.album_choices[line_number]
-        self.destroy()
-    
-        
-class UserConfiguration():
-    CONFIG_FILE = f'{pathlib.Path.home()}/.djtool.yaml'
-
-    def __init__(self, config_dict):
-        self.show_title = config_dict.get('show_title', '')
-        self.show_start_time = config_dict.get('show_start_time', 0)
-        self.zookeeper_url = config_dict.get('zookeeper_url', 'https://zookeeper.stanford.edu')
-        self.zookeeper_api = config_dict.get('zookeeper_api', '')
-        self.apikey = config_dict.get('api_key', '')
-        self.genius_api = config_dict.get('genius_api', '')
-        self.spotify_id = config_dict.get('spotify_id', '')
-        self.spotify_secret = config_dict.get('spotify_secret', '')
-
-    def have_apikeys(self):
-        retval = self.zookeeper_api and self.genius_api and self.spotify_id and self.spotify_secret
-        return retval
-
-    def to_dict(self):
-        dict = {
-            'show_title' : self.show_title,
-        }
-        return dict
-
-    def to_yaml(self):
-        data = self.to_dict()
-        yaml_string = yaml.dump(data, sort_keys=False)
-        return yaml_string
-
-    @staticmethod
-    def load_config():
-        config_yaml = {}
-        try:
-            with open(UserConfiguration.CONFIG_FILE, 'r') as file:
-                config_yaml = yaml.safe_load(file)
-        except IOError:
-            pass
-
-        config = UserConfiguration(config_yaml)
-        return config
-
-    def save_config(self):
-        yaml = self.to_yaml()
-        try:
-            with open(UserConfiguration.CONFIG_FILE, 'w') as file:
-                file.write(yaml)
-        except IOError:
-            logit("Error saving configuration file: {ex}")
-
-    def set_apikeys(self):
-        if not self.have_apikeys():
-            if not self.apikey:
-                tk.messagebox.showwarning(title="Info",
-                                          message="API keys not found. Not all functions will be available")
-            else:
-                try:
-                    ssl_context = ssl._create_unverified_context()
-                    # req = urllib.request.Request('https://kzsu/stanford.edu/internal/apikeys') #####
-                    req = urllib.request.Request('http://localhost:5000/internal/helpertokens/')
-                    req.add_header("Content-type", "application/vnd.api+json")
-                    req.add_header("Accept", "text/plain")
-                    req.add_header("X-APIKEY", self.apikey)
-                    with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:
-
-                        resp_obj = json.loads(response.read())
-                        self.spotify_id = resp_obj.get('spotify_id', None)
-                        self.spotify_secret = resp_obj.get('spotify_secret', None)
-                        self.genius_api = resp_obj.get('genius_apikey', None)
-                        self.zookeeper_api = resp_obj.get('zookeeper_apikey', None)
-                except Exception as e:
-                    logit(f"Exception geting apikeys, {e}")
-
-
-class LiveShowDialog(simpledialog.Dialog):
-    def __init__(self, parent, show_title, show_start):
-        self.parent = parent
-        self.show_title = show_title
-        self.show_start = show_start
-        self.show_title_entry = None
-        self.ok_clicked = False
-        super().__init__(parent, "Live Show Info")
-
-    def body(self, master):
-        info_msg = "Enter the name of your Zookeeper playlist. Note that playlist must be created in Zookeeper in order to complete this operation."
-
-        tk.Label(master, text=info_msg, wraplength=450, justify=tk.LEFT).grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
-
-        tk.Label(master, text="Show Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-        self.show_title_entry = tk.Entry(master, width=40)
-        self.show_title_entry.insert(0, self.show_title)
-        self.show_title_entry.grid(row=1, column=1, padx=5, pady=5)
-        return self.show_title_entry  # focus on artist field by default
-
-    def buttonbox(self):
-        box = tk.Frame(self)
-        self.ok_button = tk.Button(box, text="OK", width=10, command=self.ok)
-        self.ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = tk.Button(box, text="Cancel", width=10, command=self.cancel)
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        box.pack()
-
-    def apply(self):
-        # When Save is clicked
-        self.parent.after(10, self.parent.playlist.check_show_playlist, self.show_title_entry.get())
-
-class UserConfigurationDialog(simpledialog.Dialog):
-    def __init__(self, parent, user_configuration):
-
-        # store initial values
-        self.configuration = user_configuration
-        self.show_title_entry = None
-        self.show_start_combo = None
-        self.ok_clicked = False
-        super().__init__(parent, "Configuration")
-
-    def body(self, master):
-        tk.Label(master, text="Show Title:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-        self.show_title_entry = tk.Entry(master, width=40)
-        self.show_title_entry.insert(0, self.configuration.show_title)
-        self.show_title_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        tk.Label(master, text="Show Start:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-        self.show_start_combo = ttk.Combobox(master, state="readonly", width=15)
-        self.show_start_combo.grid(row=1, column=1, sticky='w', padx=5, pady=5)
-        time_values = [
-            '12 am', '1 am', '2 am', '3 am', '4 am', '5 am', '6 am', '7 am', '8 am', '9 am', '10 am', '11 am',
-            '12 pm', '1 pm', '2 pm', '3 pm', '4 pm', '5 pm', '6 pm', '7 pm', '8 pm', '9 pm', '10 pm', '11 pm',
-        ]
-
-        self.show_start_combo['values'] = time_values
-        self.show_start_combo.set(time_values[self.configuration.show_start_time])
-
-
-        return self.show_title_entry  # focus on artist field by default
-
-    def apply(self):
-        # When Save is clicked
-        self.ok_clicked = True
-        self.configuration.show_title = self.show_title_entry.get()
-        self.configuration.save_config()
-
-class TrackEditDialog(simpledialog.Dialog):
-    def __init__(self, parent, track):
-        self.ok_clicked = False
-        self.track_artist = track.artist
-        self.track_title  = track.title
-        self.track_album = track.album
-        self.track_fcc_status = track.fcc_status
-        self.track_fcc_comment = track.fcc_comment
-
-        super().__init__(parent, "Edit Track")
-
-    def body(self, master):
-        # Create labels
-        tk.Label(master, text="Artist:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-        tk.Label(master, text="Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-        tk.Label(master, text="Album:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-        tk.Label(master, text="FCC:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
-        tk.Label(master, text=self.track_fcc_comment).grid(row=4, column=1, sticky="w", padx=0, pady=0)
-
-        # Create entry fields with initial values
-        self.artist_entry = tk.Entry(master, width=40)
-        self.artist_entry.insert(0, self.track_artist)
-
-        self.title_entry = tk.Entry(master, width=40)
-        self.title_entry.insert(0, self.track_title)
-
-        self.album_entry = tk.Entry(master, width=40)
-        self.album_entry.insert(0, self.track_album)
-
-        self.fcc_status_combo = ttk.Combobox(master, state="readonly", width=20)
-        self.fcc_status_combo.insert(0, self.track_fcc_status)
-        self.fcc_status_combo['values'] = FCCChecker.FCC_STATUS_AR
-        self.fcc_status_combo.set(self.track_fcc_status)
-
-        # Place widgets
-        self.artist_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.title_entry.grid(row=1, column=1, padx=5, pady=5)
-        self.album_entry.grid(row=2, column=1, padx=5, pady=5)
-        self.fcc_status_combo.grid(row=3, column=1, sticky='w', padx=5, pady=5)
-
-        return self.artist_entry  # focus on artist field by default
-
-    def apply(self):
-        # When Save is clicked
-        self.ok_clicked = True
-        self.track_artist = self.artist_entry.get()
-        self.track_title = self.title_entry.get()
-        self.track_album = self.album_entry.get()
-        self.track_fcc_status = self.fcc_status_combo.get()
-
-
-
 class AudioPlaylistApp(BaseTk):
     def __init__(self):
         super().__init__()
@@ -322,6 +70,7 @@ class AudioPlaylistApp(BaseTk):
         self.geometry("600x600")
         self.minsize(480, 360)
         self.is_dirty = False
+        self.playlist = ZKPlaylist(self)
 
         self.playlist_file = ''
         self.app_title = ''
@@ -336,7 +85,7 @@ class AudioPlaylistApp(BaseTk):
         self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
         #self.playlist = ZKPlaylist(self)
-        self.downloader = TrackDownloader(YTDL_DOWNLOAD_DIR)
+        self.downloader = TrackDownloader(DJT_DOWNLOAD_DIR)
         self.configuration = UserConfiguration.load_config()
         self.configuration.set_apikeys()
 
@@ -349,7 +98,6 @@ class AudioPlaylistApp(BaseTk):
         self._insert_line = None            # blue insertion line widget
 
         self.output_devices = []            # [(index, name)]
-        self._device_refresh_ms = 3000
 
         # ----- Layout -----
         self.grid_columnconfigure(0, weight=1)
@@ -364,8 +112,6 @@ class AudioPlaylistApp(BaseTk):
         #self._build_countdown()
 
         self._bind_shortcuts()
-
-        # Initial output devices + auto-refresh
         self._refresh_output_devices()
 
     def _on_focus_in(self):
@@ -440,13 +186,15 @@ class AudioPlaylistApp(BaseTk):
         filemenu.add_command(label="Save Playlist...", command=self.save_playlist)
         filemenu.add_command(label="Update Playlist", command=self.update_playlist)
         filemenu.add_command(label="Import Audio...", command=self.import_audio_files)
-        filemenu.add_command(label="FCC Check", command=self.fcc_check)
+        filemenu.add_command(label="Save MP3...", command=self.save_mp3)
         menubar.add_cascade(label="File", menu=filemenu)
 
         editmenu = tk.Menu(menubar, tearoff=0)
         editmenu.add_command(label="Edit Track (Shift-Click)", command=self.edit_selected_track)
+        editmenu.add_command(label="Find Albums", command=self.find_albums)
         editmenu.add_command(label="Insert Pause", command=self.insert_pause)
         editmenu.add_command(label="Insert Mic-Break", command=self.insert_mic_break)
+        editmenu.add_command(label="FCC Check", command=self.fcc_check)
         menubar.add_cascade(label="Edit", menu=editmenu)
 
         self.config(menu=menubar)
@@ -457,14 +205,9 @@ class AudioPlaylistApp(BaseTk):
 
         tk.Button(top, text="■", width=3, command=self.stop_audio).pack(side="left", padx=(6, 6), pady=2)
         tk.Button(top, text="▶", width=3, command=self.play_selected).pack(side="left", padx=(0, 12), pady=2)
-        tk.Button(top, text="Save", command=self.save_playlist).pack(side="left", padx=(0, 6), pady=2)
-        tk.Button(top, text="Load", command=self.load_playlist).pack(side="left", padx=(0, 12), pady=2)
-        tk.Button(top, text="Find Albums", command=self.find_albums).pack(side="left", padx=(0, 12), pady=2)
-        tk.Button(top, text="MP3", command=self.save_mp3).pack(side="left", padx=(0, 6), pady=2)
-
         tk.Checkbutton(top, text="Live", command=self.live_show_change, variable=self.live_show).pack(side="left", padx=(0, 12), pady=2)
 
-        self.output_combo = ttk.Combobox(top, state="readonly", width=15)
+        self.output_combo = ttk.Combobox(top, postcommand=self._refresh_output_devices, state="readonly", width=15)
         self.output_combo.pack(side="right", padx=(0, 6), pady=2)
 
     # Youtube URL entry row
@@ -552,7 +295,7 @@ class AudioPlaylistApp(BaseTk):
 
         # treeview bindings
         #self.tree.bind("<space>", lambda e: self._toggle_play_pause())
-        self.tree.bind("<Double-1>", lambda e: self.play_selected())
+        self.tree.bind("<Double-1>", lambda e: self.on_double_click())
         self.tree.bind("<ButtonPress-1>", self._tv_on_btn1_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_drag_motion_internal, add="+")
         self.tree.bind("<ButtonRelease-1>", self._on_drop_internal, add="+")
@@ -564,16 +307,11 @@ class AudioPlaylistApp(BaseTk):
         self.tree.bind("<Shift-Up>", lambda e: self.on_shift_arrow(e, "up"))
         self.tree.bind("<Shift-Down>", lambda e: self.on_shift_arrow(e, "down"))
 
-        # External Finder drag/drop (only if tkinterdnd2 available)
-        if DND_AVAILABLE and DND_FILES is not None:
-            try:
-                self.tree.drop_target_register(DND_FILES)
-                self.tree.dnd_bind("<<DragEnter>>", lambda e: None)
-                self.tree.dnd_bind("<<DragLeave>>", lambda e: self._hide_insert_line())
-                self.tree.dnd_bind("<<DragMotion>>", self._on_drag_motion_external)
-                self.tree.dnd_bind("<<Drop>>", self._on_external_drop)
-            except Exception:
-                pass  # ignore if registration fails silently
+        self.tree.drop_target_register(DND_FILES)
+        self.tree.dnd_bind("<<DragEnter>>", lambda e: None)
+        self.tree.dnd_bind("<<DragLeave>>", lambda e: self._hide_insert_line())
+        self.tree.dnd_bind("<<DragMotion>>", self._on_drag_motion_external)
+        self.tree.dnd_bind("<<Drop>>", self._on_external_drop)
 
     def _build_countdown(self):
         self.countdown_label = tk.Label(self, text="", anchor="e", font=("Arial", 14))
@@ -965,6 +703,10 @@ class AudioPlaylistApp(BaseTk):
 
     # ======================= PLAYLIST SAVE/LOAD =======================
     def save_mp3(self):
+        if not shutil.which("ffmpeg"):
+            tk.messagebox.showwarning(title="Error", message='ffmpeg is required for this operation.')
+            return
+
         if not self.tree.get_children(""):
             logit("[Save] No files to save.")
             return
@@ -982,7 +724,6 @@ class AudioPlaylistApp(BaseTk):
         full_show = AudioSegment.empty()
         for item in self.tree.get_children(""):
             track = self.tree_datamap[item]
-            logit(f"mp3 export: {track.title}")
             if track.file_path.endswith('.mp3'):
                 audio = AudioSegment.from_mp3(track.file_path)
             elif track.file_path.endswith('.wav'):
@@ -1173,7 +914,7 @@ class AudioPlaylistApp(BaseTk):
             show_title = self.configuration.show_title
             LiveShowDialog(self, show_title, "12 am")
         else:
-            self.playlist.id = None
+            pass #self.playlist.id = None
 
 
     def copy_selected_rows(self):
@@ -1215,6 +956,13 @@ class AudioPlaylistApp(BaseTk):
             self.tree.item(track.id, values=row_values)
 
 
+    def on_double_click(self):
+        if self._play_thread and self._play_thread.is_alive():
+            self.stop_audio()
+            time.sleep(3)
+
+        self.play_selected()
+
     def play_selected(self):
         sel = self.tree.selection()
 
@@ -1229,6 +977,7 @@ class AudioPlaylistApp(BaseTk):
         self._play_index(idx)
 
     def _play_index(self, index: int):
+        logit(f'enter _play_index {index}')
         items = self.tree.get_children("")
         if index < 0 or index >= len(items):
             return
@@ -1313,17 +1062,18 @@ class AudioPlaylistApp(BaseTk):
                 self.after(0, lambda: self._set_countdown(""))
 
     def stop_audio(self):
+        logit(f"enter stop_audio")
         if self._play_thread and self._play_thread.is_alive():
             self._stop_playback.set()
-            self._play_thread.join(timeout=1.0)
+            self._play_thread.join(timeout=2.0)
 
         self._play_thread = None
         #self._stop_playback.clear()
         self._audio_pos_ms = 0
         self._set_countdown("")
-        self._refresh_output_devices() # pick up any new devices
 
     def _play_next_track(self):
+        logit(f"enter play_next_track")
         items = self.tree.get_children("")
 
         idx = items.index(self._track_id)
@@ -1376,6 +1126,6 @@ class AudioPlaylistApp(BaseTk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
-    #app.load_playlist("/Users/barbara/Documents/dropkick.json") ##################
+    #app.load_playlist("/Users/barbara/Documents/test.json") ##################
     app.mainloop()
 

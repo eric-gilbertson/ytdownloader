@@ -256,6 +256,7 @@ class SelectTrackDialog(simpledialog.Dialog):
         elif len(choice) == 1:
             choice_num = int(choice) - 1
             self.track_id = self.track_choices[choice_num]['videoId']
+            self.album = self.track_choices[choice_num]['album']['name']
 
     def _select_row(self, event):
         index = self.choices_entry.index(f"@{event.x},{event.y}")

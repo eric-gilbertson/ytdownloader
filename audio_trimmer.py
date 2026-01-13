@@ -3,12 +3,13 @@
 # <FILE_NAME>.sav. no change if gaps are less than GAP_SECONDS.
 
 import os, sys, subprocess, datetime, glob, pathlib
+import shutil
+
 
 # return time length in seconds of an mp3 file using ffmpeg or -1 if invalid.
 # assumes user has ffmpeg in PATH.
 def execute_ffmpeg_command(cmd):
-    cmd = "/usr/local/bin/ffmpeg -hide_banner " + cmd
-    #print("Execute: {}".format(cmd))
+    cmd = f'{shutil.which("ffmpeg")} -hide_banner ' + cmd
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (output, err) = p.communicate()
     p_status = p.wait()
@@ -19,8 +20,8 @@ def execute_ffmpeg_command(cmd):
 # return start gap, end gap and duration in seconds
 def get_gap_info(filePath):
     start_gap = end_gap = duration = 0
-    #cmd = '/usr/local/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
-    cmd = '/usr/local/bin/ffmpeg -hide_banner -i "{}"  -af silencedetect=n=-40dB:d=2.0 -f null -'.format(filePath)
+    ffmpeg_path = shutil.which("ffmpeg")
+    cmd = f'{ffmpeg_path} -hide_banner -i "{filePath}"  -af silencedetect=n=-40dB:d=2.0 -f null -'
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (output, err) = p.communicate()
     p_status = p.wait()
@@ -57,6 +58,9 @@ def get_gap_info(filePath):
     return start_gap, end_gap, duration
 
 def trim_audio(srcFile):
+    if not shutil.which("ffmpeg"):
+        return False
+
     GAP_SECONDS = 1
     start_gap, end_gap, duration = get_gap_info(srcFile)
     if duration < 0:

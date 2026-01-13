@@ -2,7 +2,7 @@ from os.path import expanduser
 import math
 
 # download directory to the staging dir
-YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl/staging"
+DJT_DOWNLOAD_DIR = expanduser("~") + "/Music/djtool/active"
 ZOOKEEPER_TIMEOUT_SECONDS = 5
         
 PAUSE_FILE = 'PAUSE'

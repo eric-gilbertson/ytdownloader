@@ -1,9 +1,14 @@
 import datetime, os, ssl
 import json
+import pathlib
 import time
 import urllib
 import tkinter as tk
+
+import yaml
 from pydub import AudioSegment
+
+import configuration
 from commondefs import *
 
 import pyaudio, os
@@ -107,7 +112,6 @@ class ZKPlaylist():
             logit(f"Exception posting track: {url}, {e}")
 
         end_time = time.time_ns()
-        print(f"exit send_track {(end_time - start_time) // 1_000_000}")
 
     def check_show_playlist(self, target_title):
         self.id = None
@@ -138,4 +142,75 @@ class ZKPlaylist():
           
         return self.id != None
 
+
+class UserConfiguration():
+    CONFIG_FILE = f'{pathlib.Path.home()}/.djtool.yaml'
+
+    def __init__(self, config_dict):
+        self.show_title = config_dict.get('show_title', '')
+        self.show_start_time = config_dict.get('show_start_time', 0)
+        self.zookeeper_url = config_dict.get('zookeeper_url', 'https://zookeeper.stanford.edu')
+        self.zookeeper_api = configuration.ZOOKEEPER_API
+        self.apikey = config_dict.get('api_key', '')
+        self.genius_api = configuration.GENIUS_TOKEN
+        self.spotify_id = configuration.SPOTIFY_ID
+        self.spotify_secret = configuration.SPOTIFY_SECRET
+
+    def have_apikeys(self):
+        retval = self.zookeeper_api and self.genius_api and self.spotify_id and self.spotify_secret
+        return retval
+
+    def to_dict(self):
+        dict = {
+            'show_title' : self.show_title,
+        }
+        return dict
+
+    def to_yaml(self):
+        data = self.to_dict()
+        yaml_string = yaml.dump(data, sort_keys=False)
+        return yaml_string
+
+    @staticmethod
+    def load_config():
+        config_yaml = {}
+        try:
+            with open(UserConfiguration.CONFIG_FILE, 'r') as file:
+                config_yaml = yaml.safe_load(file)
+        except IOError:
+            pass
+
+        config = UserConfiguration(config_yaml)
+        return config
+
+    def save_config(self):
+        yaml = self.to_yaml()
+        try:
+            with open(UserConfiguration.CONFIG_FILE, 'w') as file:
+                file.write(yaml)
+        except IOError:
+            logit("Error saving configuration file: {ex}")
+
+    def set_apikeys(self):
+        if not self.have_apikeys():
+            if not self.apikey:
+                tk.messagebox.showwarning(title="Info",
+                                          message="API keys not found. Not all functions will be available")
+            else:
+                try:
+                    ssl_context = ssl._create_unverified_context()
+                    # req = urllib.request.Request('https://kzsu/stanford.edu/internal/apikeys') #####
+                    req = urllib.request.Request('http://localhost:5000/internal/helpertokens/')
+                    req.add_header("Content-type", "application/vnd.api+json")
+                    req.add_header("Accept", "text/plain")
+                    req.add_header("X-APIKEY", self.apikey)
+                    with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:
+
+                        resp_obj = json.loads(response.read())
+                        self.spotify_id = resp_obj.get('spotify_id', None)
+                        self.spotify_secret = resp_obj.get('spotify_secret', None)
+                        self.genius_api = resp_obj.get('genius_apikey', None)
+                        self.zookeeper_api = resp_obj.get('zookeeper_apikey', None)
+                except Exception as e:
+                    logit(f"Exception geting apikeys, {e}")
 

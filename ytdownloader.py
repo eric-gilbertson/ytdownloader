@@ -19,8 +19,8 @@ from djutils import logit
 
 from track_downloader import TrackDownloader
 
-YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/ytdl"
-STAGING_DIR = YTDL_DOWNLOAD_DIR + "/staging"
+YTDL_DOWNLOAD_DIR = expanduser("~") + "/Music/djtool/reserve"
+STAGING_DIR = YTDL_DOWNLOAD_DIR + "/../active"
 
 # naming fixes:
 # Folk Alley Sessions: Anna Egge Girls..
@@ -106,7 +106,6 @@ class ControlPanel(object):
         list = self.list_widget.tree.get_children()
         item_name = self.list_widget.tree.focus()
         idx = self.list_widget.tree.index(item_name)
-        print("Play: " + item_name)
         if self.player:
             self.player.stop_player()
 
@@ -118,7 +117,6 @@ class ControlPanel(object):
 
     def double_click(self, event):
         item = self.list_widget.tree.focus()
-        print("double: {}".format(item))
         self._play_file()
 
     def delete_click(self, event):
@@ -126,7 +124,6 @@ class ControlPanel(object):
             return
 
         for item in self.list_widget.tree.selection():
-            print("delete: {}".format(item))
             if os.path.exists(item):
                 os.remove(item)
 
@@ -135,7 +132,6 @@ class ControlPanel(object):
 
     def _stop_play(self):
         item_name = self.list_widget.tree.selection()
-        print("stop play")
         self.player.stop_player()
 
     def _fetch_url_start(self, useFullName=True):
@@ -164,7 +160,6 @@ class ControlPanel(object):
                     self.downloader.edit_track(root, new_track)
 
                 file_name = os.path.basename(new_track.track_file)
-                print(f"new file: {new_track.track_file}, {file_name}")
                 self.list_widget.tree.insert('', 'end', iid=new_track.track_file, text=file_name, values=(['x', file_name]))
             else:
                 tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
@@ -232,13 +227,9 @@ class FilePickerListbox(object):
         else:
             self.have_shift = False
 
-        print(f"Shift change {self.have_shift}")
 
     def on_item_select(self, event):
-        print(f"Shift {self.have_shift}")
         selected_items = self.tree.selection() # Get the selected item(s)
-        for item in selected_items:
-            print("Selected item:", self.tree.item(item, "text"))
 
     def _set_file_header(self):
         msg = 'Files: ({})'.format(len(self.tree.get_children()))
@@ -246,7 +237,6 @@ class FilePickerListbox(object):
 
 
     def drag_init(self, event):
-        print("drag init")
         data = ()
         self.item_name = self.tree.selection()
         if self.item_name:
@@ -270,7 +260,6 @@ class FilePickerListbox(object):
         return stage_file
 
     def drag_end(self, event):
-        print("drag end")
         action = event.action
         # reset the "dragging" flag to enable drops again
         for item in self.item_name:
@@ -324,7 +313,6 @@ class FilePickerListbox(object):
         mpe_path = mpe_path + "*- [123456789] -*"
         files = glob.glob(mpe_path + ".mp3") + glob.glob(mpe_path + ".wav")
         for mpefile in files:
-            print("move file: " + mpefile)
             trim_audio(mpefile)
             shutil.move(mpefile, YTDL_DOWNLOAD_DIR)
 
@@ -350,7 +338,6 @@ class FilePickerListbox(object):
             name = fileAr[0]
             if not name in loadedFiles:
                 loadedFiles.append(name)
-                #print("add: " + name)
                 self.tree.insert('', 'end', iid=fileAr[1], text=name, values=(['x', name]))
             else:
                 pass #logit("File already exists: " + name)
