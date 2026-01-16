@@ -30,24 +30,17 @@ import math, os, shlex, socket, ssl, threading, traceback
 import urllib.request
 from urllib.parse import unquote
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox, simpledialog, PhotoImage
 import pyaudio
 from pydub import AudioSegment
 
-from dialogs import SelectAlbumDialog, LiveShowDialog, UserConfigurationDialog, TrackEditDialog
+from djtool_dialogs import SelectAlbumDialog, LiveShowDialog, UserConfigurationDialog, TrackEditDialog
 from models import Track, ZKPlaylist, UserConfiguration
 from track_downloader import TrackDownloader, getTitlesYouTube
 from djutils import logit
+from tkinterdnd2 import TkinterDnD, DND_FILES
+from tkinter import PhotoImage
 
-# ---------- Optional DnD (Finder drag/drop) ----------
-try:
-    from tkinterdnd2 import TkinterDnD, DND_FILES
-    BaseTk = TkinterDnD.Tk
-    DND_AVAILABLE = True
-except Exception:
-    BaseTk = tk.Tk
-    DND_FILES = None
-    DND_AVAILABLE = False
 
 def seconds_from_HMS(time_hms):
     seconds = 0
@@ -60,10 +53,18 @@ def seconds_from_HMS(time_hms):
     return seconds
 
 
-class AudioPlaylistApp(BaseTk):
+class AudioPlaylistApp(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
 
+        # ---- macOS Dock reopen handler ----
+        dock_icon = PhotoImage(file='./djtool.png')
+        self.iconphoto(True, dock_icon)
+        self.createcommand(
+            "tk::mac::ReopenApplication",
+            self.on_dock_reopen
+        )
+          
         self.DEFAULT_TITLE = "DJ Tool"
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -71,6 +72,7 @@ class AudioPlaylistApp(BaseTk):
         self.minsize(480, 360)
         self.is_dirty = False
         self.playlist = ZKPlaylist(self)
+        self.last_doubleclick_time = 0
 
         self.playlist_file = ''
         self.app_title = ''
@@ -113,6 +115,12 @@ class AudioPlaylistApp(BaseTk):
 
         self._bind_shortcuts()
         self._refresh_output_devices()
+
+    def on_dock_reopen(self):
+        """Called when Dock icon is clicked."""
+        self.deiconify()
+        self.lift()
+        self.focus_force()
 
     def _on_focus_in(self):
         self.have_focus = True
@@ -167,8 +175,6 @@ class AudioPlaylistApp(BaseTk):
 
                 
     def _edit_configuration(self):
-        print("edit configuration")
-
         dialog = UserConfigurationDialog(self, self.configuration)
     
         if dialog.ok_clicked:
@@ -180,6 +186,14 @@ class AudioPlaylistApp(BaseTk):
     # ======================= UI BUILD =======================
     def _build_menubar(self):
         menubar = tk.Menu(self)
+
+        # MacOS magic to remove Python entry in the menubar. must be done in exactly
+        # this order.
+        dummy_header = tk.Menu(menubar, name='apple')
+        menubar.add_cascade(menu=dummy_header)
+        self.config(menu=menubar)
+        dummy_header.destroy()
+
         filemenu = tk.Menu(menubar, tearoff=0)
         filemenu.add_command(label="Configure...", command=self._edit_configuration)
         filemenu.add_command(label="Load Playlist...", command=self.load_playlist)
@@ -236,7 +250,6 @@ class AudioPlaylistApp(BaseTk):
         w = event.widget
         keysym = event.keysym
 
-        print(f"key {event.keysym}")
         if (event.state & 0xC):  # 0xC works for Max & Windows
             if keysym.lower() == "c":  # Copy
                 w.event_generate("<<Copy>>")
@@ -384,12 +397,10 @@ class AudioPlaylistApp(BaseTk):
         return selection_index
 
     def insert_pause(self):
-        print("insert pause")
         insert_index = self._get_selected_index()
         self._insert_track(insert_index, '', '', '', PAUSE_FILE, '', PAUSE_FILE, True)
 
     def insert_mic_break(self):
-        print("insert mic_break")
         insert_index = self._get_selected_index()
         self._insert_track(insert_index, '','', '', MIC_BREAK_FILE, '', MIC_BREAK_FILE, True)
 
@@ -906,7 +917,6 @@ class AudioPlaylistApp(BaseTk):
         if self._play_thread and self._play_thread.is_alive() and not self._stop_playback.is_set():
             self._stop_playback.set()
         else:
-            print("tp0")
             self.play_selected()
 
     def live_show_change(self):
@@ -957,10 +967,20 @@ class AudioPlaylistApp(BaseTk):
 
 
     def on_double_click(self):
-        if self._play_thread and self._play_thread.is_alive():
-            self.stop_audio()
-            time.sleep(3)
+        cur_time = time.time()
+        time_delta = cur_time - self.last_doubleclick_time
+        self.last_doubleclick_time = cur_time
+        if time_delta < 10:
+            return
 
+        logit(f"enter on_double_click: {time_delta}")
+        self._stop_playback.set()
+        if self._play_thread and self._play_thread.is_alive():
+            logit("stop audio1")
+            self.stop_audio()
+            logit("stop audio2")
+
+        logit("play selected from double")
         self.play_selected()
 
     def play_selected(self):
@@ -973,7 +993,7 @@ class AudioPlaylistApp(BaseTk):
             return
 
         idx = self.tree.index(sel[0])
-        print(f"play selected: {idx}")
+        logit(f"play selected: {idx}")
         self._play_index(idx)
 
     def _play_index(self, index: int):
@@ -984,6 +1004,7 @@ class AudioPlaylistApp(BaseTk):
 
         id = items[index]
         track = self.tree_datamap.get(id, None)
+        logit(f'enter _play_index {index}, {track.title}')
         if not track:
             logit(f"Item not found: {id}")
             return
@@ -1027,8 +1048,7 @@ class AudioPlaylistApp(BaseTk):
                 channels=audio_segment.channels, rate=audio_segment.frame_rate,
                 frames_per_buffer=4096, output=True,
             )
-            dev_index = self._get_selected_device_index()
-            if dev_index is not None:
+            if dev_index := self._get_selected_device_index() is not None:
                 kwargs["output_device_index"] = dev_index
 
             stream = pa.open(**kwargs)
@@ -1036,6 +1056,7 @@ class AudioPlaylistApp(BaseTk):
             chunk_ms = 50  # smooth, low-latency
             pos = 0
             total = len(audio_segment)
+            logit(f"start play: {pos}, {total}, {self._stop_playback.is_set()}")
             while pos < total and not self._stop_playback.is_set():
                 nxt = min(pos + chunk_ms, total)
                 chunk = audio_segment[pos:nxt]
@@ -1043,6 +1064,7 @@ class AudioPlaylistApp(BaseTk):
                 pos = nxt
                 self._audio_pos_ms = pos
 
+            logit(f"done playing")
             stream.stop_stream()
             stream.close()
         except Exception as ex:
@@ -1056,8 +1078,10 @@ class AudioPlaylistApp(BaseTk):
             # Natural end -> play next (unless stopped)
             self._set_title("")
             if not self._stop_playback.is_set():
+                logit("done, play next track")
                 self.after(120, self._play_next_track)
             else:
+                logit("halt playback")
                 self._audio_pos_ms = 0
                 self.after(0, lambda: self._set_countdown(""))
 
