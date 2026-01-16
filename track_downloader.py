@@ -30,9 +30,10 @@ class CommandThread(threading.Thread):
         pass
 
 class TrackDownloader():
-    def __init__(self, download_dir):
+    def __init__(self, parent, download_dir):
         self.YTDL_PATH = shutil.which('yt-dlp')
         self.download_dir = download_dir
+        self.parent = parent
         self.download_thread = None
         self.name_too_long = False
         self.err_msg = ''
@@ -62,7 +63,7 @@ class TrackDownloader():
             title = track_specifier_ar[1]
             tracks = getTracksYouTube(artist, title)
             if len(tracks) == 0:
-                tk.messagebox.showwarning(title="Error", message=f"Nothing found for -{title}- by -{artist}-")
+                tk.messagebox.showwarning(title="Error", message=f"Nothing found for -{title}- by -{artist}-", parent=self.parent)
                 return False
             else:
                 dialog = SelectTrackDialog(parent, artist, title, tracks)
@@ -75,7 +76,7 @@ class TrackDownloader():
             self.track_url = track_specifier
 
         if not "youtube.com/watch?" in self.track_url:
-            tk.messagebox.showwarning(title="Error", message=f"Invalid request entry. Use either a Youtube watch URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME>;<SONG_TITLE>")
+            tk.messagebox.showwarning(title="Error", message=f"Invalid request entry. Use either a Youtube watch URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME>;<SONG_TITLE>", parent=self.parent)
             return False
 
         cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.track_url)

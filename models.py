@@ -30,8 +30,11 @@ class Track():
         self.fcc_status = fcc_status if fcc_status else ''
         self.fcc_comment = fcc_comment if fcc_comment else ''
 
-        if duration <= 0 and os.path.exists(file_path):
-           self.duration = len(AudioSegment.from_file(file_path))/1000
+        if duration <= 0:
+            if os.path.exists(file_path):
+                self.duration = len(AudioSegment.from_file(file_path))/1000
+            else:
+                self.duration = 0
 
     def to_dict(self):
         dict = self.__dict__

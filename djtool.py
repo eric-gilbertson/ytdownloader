@@ -87,7 +87,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
         #self.playlist = ZKPlaylist(self)
-        self.downloader = TrackDownloader(DJT_DOWNLOAD_DIR)
+        self.downloader = TrackDownloader(self, DJT_DOWNLOAD_DIR)
         self.configuration = UserConfiguration.load_config()
         self.configuration.set_apikeys()
 
@@ -138,7 +138,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
     def _fetch_track(self, useFullName=True):
         trackurl = self.urlEntry.get() 
         if ';' not in trackurl and 'youtube.com' not in trackurl:
-            tk.messagebox.showwarning(title="Error", message=f"Invalid song request. Use either a Youtube video URL or <ARTIST_NAME>;<SONG_TITLE>")
+            tk.messagebox.showwarning(title="Error", message=f"Invalid song request. Use either a Youtube video URL or <ARTIST_NAME>;<SONG_TITLE>", parent=self)
         elif self.downloader.fetch_track(self, trackurl, useFullName):
             self.url.config(cursor="clock")
             self.url.update()
@@ -153,7 +153,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         else:
             self.bell()
             if self.downloader.name_too_long:
-                if tk.messagebox.askokcancel(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
+                if tk.messagebox.askokcancel(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name', parent=self):
                     self.downloader.is_done = False
                     self.downloader.name_too_long = False
                     self.downloader.fetch_track(self, 'dummy-url', False)
@@ -171,7 +171,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
                 self._insert_track(-1, status, comment, track.artist, track.title, track.album, track.track_file, True)
             else:
-                tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
+                tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg, parent=self)
 
                 
     def _edit_configuration(self):
@@ -634,7 +634,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         for path in files:
             path = path.strip()
             if not path or not path.lower().endswith((".mp3", ".wav")) or not os.path.isfile(path):
-                tk.messagebox.showwarning(title="Error", message=f'Ignoring invalid file:" {path}')
+                tk.messagebox.showwarning(title="Error", message=f'Ignoring invalid file:" {path}', parent=self)
                 continue
 
             (artist, title, album) = self._get_track_info(path)
@@ -669,7 +669,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         elif is_pause_file(title):
             tags = ("pause")
 
-        track = Track(-1, fcc_status, fcc_comment, artist, title, album, path, -1)
+        track = Track(-1, fcc_status, fcc_comment, artist, title, album, path, 0)
         track.id = self.tree.insert("", insert_index, values=(insert_index+1, track.duration, artist, title, album, track.fcc_status), tags=tags)
         self.tree_datamap[track.id] = track
     
@@ -715,7 +715,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
     # ======================= PLAYLIST SAVE/LOAD =======================
     def save_mp3(self):
         if not shutil.which("ffmpeg"):
-            tk.messagebox.showwarning(title="Error", message='ffmpeg is required for this operation.')
+            tk.messagebox.showwarning(title="Error", message='ffmpeg is required for this operation.', parent=self)
             return
 
         if not self.tree.get_children(""):
@@ -735,6 +735,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         full_show = AudioSegment.empty()
         for item in self.tree.get_children(""):
             track = self.tree_datamap[item]
+            audio = None
             if track.file_path.endswith('.mp3'):
                 audio = AudioSegment.from_mp3(track.file_path)
             elif track.file_path.endswith('.wav'):
@@ -742,15 +743,16 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             else:
                 logit("Skip: " + track.file_path)
 
-            full_show = full_show + audio
+            if audio:
+                full_show = full_show + audio
 
         logit(f"export {filename}")
         full_show.export(filename, format="mp3")
-        tk.messagebox.showwarning(title="MP3 File Saved", message=f'Playlist saved as {filename}')
+        tk.messagebox.showwarning(title="MP3 File Saved", message=f'Playlist saved as {filename}', parent= self)
 
     def fcc_check(self):
         for track in self.tree_datamap.values():
-            if not track.have_fcc_status():
+            if not track.have_fcc_status() and not is_stop_file(track.title):
                 status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
                 track.fcc_status = status
                 track.fcc_comment = comment
@@ -789,7 +791,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if os.path.exists(self.playlist_file):
             self.do_playlist_save(self.playlist_file)
             playlist_name = os.path.basename(self.playlist_file)
-            tk.messagebox.showwarning(title="Playlist Updated", message=f'Playlist updates saved to {playlist_name}')
+            tk.messagebox.showwarning(title="Playlist Updated", message=f'Playlist updates saved to {playlist_name}', parent= self)
         else:
             self.save_playlist()
 
@@ -901,7 +903,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         except Exception as e:
             msg = (f"Error processing {fp}, {e}")
             logit(msg)
-            tk.messagebox.showwarning(title="File Import Error", message=msg)
+            tk.messagebox.showwarning(title="File Import Error", message=msg, parent= self)
 
 
     # ======================= PLAYBACK =======================
@@ -1025,7 +1027,13 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         # Stop current playback if any
         self.stop_audio()
 
-        audio = AudioSegment.from_file(track.file_path)
+        try:
+            audio = AudioSegment.from_file(track.file_path)
+        except BaseException as ex:
+            logit(f"File not playable {track.file_path}, {ex}")
+            self._play_next_track()
+            return
+
         self._audio_total_ms = len(audio)
         self._audio_pos_ms = 0
         self._stop_playback.clear()
@@ -1150,6 +1158,6 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
-    #app.load_playlist("/Users/barbara/Documents/test.json") ##################
+    #app.load_playlist("/Users/barbara/Documents/boneyard_jan17.json") ##################
     app.mainloop()
 

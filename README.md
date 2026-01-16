@@ -7,6 +7,11 @@ are dragged, e.g. it assumes that the target tool creates its own copy of the fi
 are downloaded into ~/Music/ytdl. This program assumes that youtube-dl has been installed and
 included in the user's $PATH.
 
+## Requirements
+   - Python 3.9+
+   - yt-dlp 2025.10.22+
+   - ffmpeg (required if exporting program to MP3)
+
 ## Setup
 
 This tool assumes that youtube-dl has been installed and included in the user's $PATH variable.
@@ -18,12 +23,6 @@ The steps for the entire app tool set on a Mac from a terminal are are follows:
    - test youtube-dl if it cannot be executed do the following:
        - sudo chown <USER_NAME> /usr/local/bin/youtube-dl
        - chmod u+x /usr/local/bin/youtube-dl
-
-   - cd <SOURCE_DIR>
-   - git clone git@github.com:eric-gilbertson/ytdownloader.git
-   - cd ytdownloader
-   - python3 -m pip install --user -r requirements.txt
-
 
 Note: the ytdownloader app will not run on the lastest Apple Silicon Macbook because the required tkdnd2 Python library is not available for this architecture.
 
@@ -41,7 +40,7 @@ approximately 10 seconds after the Drag and Drop operation is completed.
 Installing yt-dlp:
 Yt-dlp can be installed using on Macs using either the Homebrew (aka brew)  or Macport (aka port) 
 software installation tools which can then be used to install yt-dlp. The steps for doing this using
-Macport are as follows:
+Macport (recommended) are as follows:
 
        * identify your MacOs version by opening About This Mac (from top left)
        * goto  https://www.macports.org/install.php 
@@ -52,8 +51,29 @@ Macport are as follows:
 To install using Homebrew do the following:
        * open a terminal by clicking: Finder > Applications > Utilities > Terminal.
        * enter 'brew install yt-dlp (this takes about 1 hour to complete)
-       *
        
+Note that occasional changes to the YouTube interface will cause your version of yt-dlp to fail. In this case try upgrading to the newest version with 'yt-dlp --update'. 
+
+## Setup
+   - If necessary install Python 3.9 (or newer) from https://www.python.org/downloads/macos/
+   - git clone git@github.com:eric-gilbertson/djtool.git
+   - cd djtool
+   - python3 -m venv venv
+   - source venv/bin/activate
+   - python3 -m pip install --user -r requirements.txt
+   - cp configuration.py.ref configuration.py and add API keys
+   - test: 'python3 djtool.py'
+
+Use the following optional steps in order to add a desktop icon for invoking DJTool from the desktop
+   - unzip djtool.app.zip -d ~/Desktop
+   - edit ~/Desktop/DJTool.app/Contents/document.wflow
+   - under Run Shell Script edit COMMAND_STRING to point to the project directory
+   - open djtool.png in Preview and copy the image
+   - RC on the DJtool desktop icon and click info (info dialog will appear)
+   - click on the thumbnail image in the upper/left corner and paste the new image
+   - close info dialog (DJTool icon should now display)
+   - test: double click in the djtool icon
+
 
 TODO:
 create ~/Music/ytdl if not exist
