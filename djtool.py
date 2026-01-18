@@ -76,11 +76,10 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
         self.playlist_file = ''
         self.app_title = ''
-        self._set_title()
 
         # ----- State -----
         self._stop_playback = threading.Event()
-        self._paused = False
+        self._paused = True
         self._play_thread = None
         self._track_id = None
         self._audio_total_ms = 0
@@ -115,6 +114,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
         self._bind_shortcuts()
         self._refresh_output_devices()
+        self._set_title()
 
     def on_dock_reopen(self):
         """Called when Dock icon is clicked."""
@@ -198,7 +198,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         filemenu.add_command(label="Configure...", command=self._edit_configuration)
         filemenu.add_command(label="Load Playlist...", command=self.load_playlist)
         filemenu.add_command(label="Save Playlist...", command=self.save_playlist)
-        filemenu.add_command(label="Update Playlist", command=self.update_playlist)
+        filemenu.add_command(label="Update Playlist", accelerator = '⌘-s', command=self.update_playlist)
         filemenu.add_command(label="Import Audio...", command=self.import_audio_files)
         filemenu.add_command(label="Save MP3...", command=self.save_mp3)
         menubar.add_cascade(label="File", menu=filemenu)
@@ -307,7 +307,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self._hide_insert_line()
 
         # treeview bindings
-        #self.tree.bind("<space>", lambda e: self._toggle_play_pause())
+        self.tree.bind("<space>", lambda e: self._toggle_play_pause())
         self.tree.bind("<Double-1>", lambda e: self.on_double_click())
         self.tree.bind("<ButtonPress-1>", self._tv_on_btn1_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_drag_motion_internal, add="+")
@@ -332,7 +332,8 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
     # global bindings
     def _bind_shortcuts(self):
-        self.bind_all("<space>", lambda e: self._toggle_play_pause())
+        self.bind_all("<Command-s>", lambda e: self.update_playlist())
+#       self.bind_all("<space>", lambda e: self._toggle_play_pause())
 #        self.bind("<s>", lambda e: self.stop_audio())
 #        self.bind("<Delete>", lambda e: self._delete_selected())
 #        self.bind("<BackSpace>", lambda e: self._delete_selected())
@@ -732,6 +733,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if not filename:
             return
 
+        logit('start wav file concatenation')
         full_show = AudioSegment.empty()
         for item in self.tree.get_children(""):
             track = self.tree_datamap[item]
@@ -746,8 +748,9 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             if audio:
                 full_show = full_show + audio
 
-        logit(f"export {filename}")
+        logit(f"start mp3 export {filename}")
         full_show.export(filename, format="mp3")
+        logit(f"done mp3 export {filename}")
         tk.messagebox.showwarning(title="MP3 File Saved", message=f'Playlist saved as {filename}', parent= self)
 
     def fcc_check(self):
@@ -791,7 +794,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if os.path.exists(self.playlist_file):
             self.do_playlist_save(self.playlist_file)
             playlist_name = os.path.basename(self.playlist_file)
-            tk.messagebox.showwarning(title="Playlist Updated", message=f'Playlist updates saved to {playlist_name}', parent= self)
+            #tk.messagebox.showwarning(title="Playlist Updated", message=f'Playlist updates saved to {playlist_name}', parent= self)
         else:
             self.save_playlist()
 
@@ -986,12 +989,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self.play_selected()
 
     def play_selected(self):
-        sel = self.tree.selection()
-
-        # need focus check because double clicking in tree while the app is not in
-        # focus results in this being called twice, once pre and then posts focus so
-        # we ignore the first one.
-        if not self.have_focus or not sel:
+        if not (sel := self.tree.selection()):
             return
 
         idx = self.tree.index(sel[0])
@@ -1056,7 +1054,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 channels=audio_segment.channels, rate=audio_segment.frame_rate,
                 frames_per_buffer=4096, output=True,
             )
-            if dev_index := self._get_selected_device_index() is not None:
+            if (dev_index := self._get_selected_device_index()) is not None:
                 kwargs["output_device_index"] = dev_index
 
             stream = pa.open(**kwargs)
@@ -1128,7 +1126,8 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             suffix = '*' if self.is_dirty else ''
             self.app_title = f'{self.DEFAULT_TITLE} - {pathlib.Path(self.playlist_file).stem}{suffix}'
 
-        self.title(self.app_title)
+        if self._paused:
+            self.title(self.app_title)
 
     # ----- Countdown updates -----
     def _set_countdown(self, time_str):
@@ -1158,6 +1157,6 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
 if __name__ == "__main__":
     app = AudioPlaylistApp()
-    #app.load_playlist("/Users/barbara/Documents/boneyard_jan17.json") ##################
+    #app.load_playlist("/Users/barbara/Documents/test.json") ##################
     app.mainloop()
 

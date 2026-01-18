@@ -1,5 +1,4 @@
-from tkinter import simpledialog
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, simpledialog
 import tkinter as tk
 
 from fcc_checker import FCCChecker
@@ -7,12 +6,10 @@ from fcc_checker import FCCChecker
 
 class SelectAlbumDialog(simpledialog.Dialog):
     def __init__(self, parent, artist, track, album_choices):
-        # store initial values
         self.artist = artist
         self.track = track
         self.album_choices = album_choices
         self.album = ''
-        self.album_choices = album_choices
         self.ok_clicked = False
         super().__init__(parent, f'Select Album')
 
@@ -48,14 +45,22 @@ class SelectAlbumDialog(simpledialog.Dialog):
         self.ok_clicked = True
 
         choice = self.choice_entry.get()
+        choice_int = -1
+        try:
+            if 0 < len(choice) <= 2:
+                choice_int = int(choice)
+        except ValueError as e:
+            pass
+
         if len(choice) == 0:
             self.ok_clicked = False
             self.album = ''
-        elif len(choice) == 1:
-            choice_num = int(choice)
-            self.album = self.album_choices[choice_num]
+        elif 0 <= choice_int < len(self.album_choices):
+            self.album = self.album_choices[choice_int]
         else:
             self.album = choice # assume user entered track
+
+        self.destroy_dialog()
 
     def _select_row(self, event):
         index = self.choices_entry.index(f"@{event.x},{event.y}")
@@ -65,8 +70,11 @@ class SelectAlbumDialog(simpledialog.Dialog):
 
         self.ok_clicked = True
         self.album = self.album_choices[line_number]
-        self.destroy()
+        self.destroy_dialog()
     
+    def destroy_dialog(self):
+        self.grab_release() # Release grab before destroying
+        self.destroy()
         
 
 class LiveShowDialog(simpledialog.Dialog):
@@ -139,16 +147,20 @@ class UserConfigurationDialog(simpledialog.Dialog):
 
 class TrackEditDialog(simpledialog.Dialog):
     def __init__(self, parent, track):
+        self.parent = parent
         self.ok_clicked = False
         self.track_artist = track.artist
         self.track_title  = track.title
         self.track_album = track.album
         self.track_fcc_status = track.fcc_status
         self.track_fcc_comment = track.fcc_comment
-
         super().__init__(parent, "Edit Track")
 
+
     def body(self, master):
+        #self.grab_set()
+        #self.transient(self.parent)  # Set as child of parent
+
         # Create labels
         tk.Label(master, text="Artist:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
         tk.Label(master, text="Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)

@@ -67,6 +67,15 @@ class ZKPlaylist():
         self.end_hour = 0.0
         self.ssl_context = ssl._create_unverified_context()
 
+    @staticmethod
+    def HM_from_float(float_time):
+        hour = int(float_time)
+        mins = int((float_time - hour)*100)
+        suffix = 'pm' if hour >= 12 else 'am'
+        hour = hour - 12 if hour > 12 else hour
+        retval = f'{hour}{suffix}' if mins == 0 else f'{hour}:{mins:02d} {suffix}'
+        return retval
+
     # return true if playlist is active and within start/end window
     def _is_active(self):
         is_active = False
@@ -83,7 +92,7 @@ class ZKPlaylist():
     def send_track(self, track):
         start_time = time.time_ns()
         if not self.id or not self._is_active() or is_pause_file(track.title) or track.title.startswith("LID_"):
-            logit(f"abort send_track {self.id}")
+            logit(f"skip send_track {self.id}, {self._is_active()}")
             return
 
         url = self.parent.configuration.zookeeper_url + f'/api/v2/playlist/{self.id}/events'
@@ -132,7 +141,9 @@ class ZKPlaylist():
                          time_ar = attrs['time'].split('-')
                          self.start_hour = float(time_ar[0][:2]) + (int(time_ar[0][2:4]) / 60.0)
                          self.end_hour = float(time_ar[1][:2]) + (int(time_ar[1][2:4]) / 60.0)
-                         msg = f'Playlist found. Track spins will be logged to {target_title} between {time_ar[0]} and {time_ar[1]}, {self.id}'
+                         start_str = self.HM_from_float(self.start_hour)
+                         end_str = self.HM_from_float(self.end_hour)
+                         msg = f'Playlist found. Track spins will be logged to your show between {start_str} and {end_str}, {self.id}'
                          tk.messagebox.showwarning(title="Info", message=msg)
                          break
                       

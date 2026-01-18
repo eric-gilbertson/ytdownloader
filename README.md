@@ -10,6 +10,7 @@ included in the user's $PATH.
 ## Requirements
    - Python 3.9+
    - yt-dlp 2025.10.22+
+   - portaudio
    - ffmpeg (required if exporting program to MP3)
 
 ## Setup
@@ -55,6 +56,9 @@ To install using Homebrew do the following:
 Note that occasional changes to the YouTube interface will cause your version of yt-dlp to fail. In this case try upgrading to the newest version with 'yt-dlp --update'. 
 
 ## Setup
+   Monterey:
+   - install macport & homebrew
+
    - If necessary install Python 3.9 (or newer) from https://www.python.org/downloads/macos/
    - git clone git@github.com:eric-gilbertson/djtool.git
    - cd djtool
