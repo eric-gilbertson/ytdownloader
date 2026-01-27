@@ -62,7 +62,16 @@ In order to utilize all the DJTool features, you must install several open sourc
    - ffmpeg (can be download directly from https://www.ffmpeg.org/download.html
    - portaudio (use package manager tool)
 
+MacOs:
+Best to use homebrew but you will need to use MacPorts if you have an older OS.
+   - insall homebrew, aka brew
+   - brew install ffmpeg
+
 One advantage of installing yt-dlp directly from the project gitbhub repo is that from it you can upgrade to the latest version by executing 'yt-dlp -U'. This self upgrade is not possible with versions installed via a pacakage manager which may not contain the newest version.
+
+XXXXX
+remove audioioop-ltd if older python
+remove configuration.py import
 
 After installing the helper tools, install DJTool as follows:
    - check your default system Python using 'python3 --version

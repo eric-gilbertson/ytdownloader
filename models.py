@@ -169,14 +169,21 @@ class ZKPlaylist():
 
 
     def check_show_playlist(self, target_title):
+        apikey = SystemConfig.user_apikey
+        if not apikey:
+            tk.messagebox.showwarning("Missing User Key", "The User API Key must be set using File->Configuration in order to use this feature.")
+            return False
+
         self.id = None
-        now_date = datetime.datetime.now().date().isoformat()
         title_safe = urllib.parse.quote(target_title)
         url = SystemConfig.playlist_host + f'/djtool/showplaylist/?show_title={title_safe}'
+        req = urllib.request.Request(url, method=f'GET')
+        req.add_header("Content-type", "application/vnd.api+json")
+        req.add_header("Accept", "text/plain")
+        req.add_header("X-APIKEY", apikey)
 
         try:
-            target_title_lc = target_title.lower()
-            with urllib.request.urlopen(url, timeout=2, context=self.ssl_context) as response:
+            with urllib.request.urlopen(req, timeout=2, context=self.ssl_context) as response:
                 playlist  = json.loads(response.read())
                 if 'id' in playlist:
                     self.id = playlist['id']

@@ -37,7 +37,7 @@ class TrackDownloader():
         self.download_thread = None
         self.name_too_long = False
         self.err_msg = ''
-        self.track = Track(-1, '', '', '', '', '', '', 0)
+        self.track = Track(-1, '', '', '', '', '', '', '', 0)
         self.track_url = ''
         self.track_file = None
         self.track_album = ''
@@ -54,8 +54,17 @@ class TrackDownloader():
         artistTerm = '%(artist)s' if use_fullname  else 'UNKNOWN'
         out_file = '"{}/{}_%(title)s.%(ext)s"'.format(self.download_dir, artistTerm)
         self.track_album = ''
-
         track_specifier_ar = re.split(ARTIST_TRACK_SEPARATOR, track_specifier)
+        error_msg = "Invalid song request. Use either a Youtube watch URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME><SEPERATOR><SONG_TITLE> using -, ; or <TAB> as the artist/title separator"
+        
+        if not self.YTDL_PATH:
+            tk.messagebox.showwarning(title="Error", message='The yt-dlp application was not found. Please install it as described in the help documentation and try again', parent=self.parent)
+            return False
+
+        if not is_url and len(track_specifier_ar) <  2:
+            tk.messagebox.showwarning(title="Error", message=error_msg, parent=self.parent)
+            return False
+
         # use_fullname is false when the first try fails because the artist name was too long
         # for the filename. if a second try then skip the track lookup and use the previous URL.
         if not is_url and use_fullname  and len(track_specifier_ar) == 2:
@@ -76,7 +85,7 @@ class TrackDownloader():
             self.track_url = track_specifier
 
         if not "youtube.com/watch?" in self.track_url:
-            tk.messagebox.showwarning(title="Error", message=f"Invalid request entry. Use either a Youtube watch URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME>;<SONG_TITLE>", parent=self.parent)
+            tk.messagebox.showwarning(title="Error", message=error_msg, parent=self.parent)
             return False
 
         cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.track_url)
