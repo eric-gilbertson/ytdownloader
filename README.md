@@ -56,10 +56,17 @@ To install using Homebrew do the following:
 Note that occasional changes to the YouTube interface will cause your version of yt-dlp to fail. In this case try upgrading to the newest version with 'yt-dlp --update'. 
 
 ## Setup
-   Monterey:
-   - install macport & homebrew
+In order to utilize all the DJTool features, you must install several open source helper utilities, including: ffmpeg, yt-dlp and portaudio. They can be installed via direct download from the sites listed below or by a package installer such as homebrew or macport (Mac), apt (Linux) or MSYS2 (Windows). With these tools you should install the following:
 
-   - If necessary install Python 3.9 (or newer) from https://www.python.org/downloads/macos/
+   - yt-dlp (can be downloaded directly from: https://github.com/yt-dlp/yt-dlp/wiki/Installation
+   - ffmpeg (can be download directly from https://www.ffmpeg.org/download.html
+   - portaudio (use package manager tool)
+
+One advantage of installing yt-dlp directly from the project gitbhub repo is that from it you can upgrade to the latest version by executing 'yt-dlp -U'. This self upgrade is not possible with versions installed via a pacakage manager which may not contain the newest version.
+
+After installing the helper tools, install DJTool as follows:
+   - check your default system Python using 'python3 --version
+   - if less than Python 3.9 install newer version from https://www.python.org/downloads/macos/
    - git clone git@github.com:eric-gilbertson/djtool.git
    - cd djtool
    - python3 -m venv venv
@@ -71,7 +78,7 @@ Note that occasional changes to the YouTube interface will cause your version of
 Use the following optional steps in order to add a desktop icon for invoking DJTool from the desktop
    - unzip djtool.app.zip -d ~/Desktop
    - edit ~/Desktop/DJTool.app/Contents/document.wflow
-   - under Run Shell Script edit COMMAND_STRING to point to the project directory
+   - under Run Shell Script edit COMMAND_STRING to point to the project directory, e.g. cd /Users/<USER_NAME>/src/djtool; ./venv/bin/python3.9 ./djtool
    - open djtool.png in Preview and copy the image
    - RC on the DJtool desktop icon and click info (info dialog will appear)
    - click on the thumbnail image in the upper/left corner and paste the new image

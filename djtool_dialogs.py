@@ -2,6 +2,7 @@ from tkinter import ttk, simpledialog
 import tkinter as tk
 
 from fcc_checker import FCCChecker
+from models import UserConfiguration
 
 
 class SelectAlbumDialog(simpledialog.Dialog):
@@ -94,6 +95,7 @@ class LiveShowDialog(simpledialog.Dialog):
         tk.Label(master, text="Show Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
         self.show_title_entry = tk.Entry(master, width=40)
         self.show_title_entry.insert(0, self.show_title)
+        self.show_title_entry.bind('<Return>', self.ok)
         self.show_title_entry.grid(row=1, column=1, padx=5, pady=5)
         return self.show_title_entry  # focus on artist field by default
 
@@ -110,19 +112,14 @@ class LiveShowDialog(simpledialog.Dialog):
         self.parent.after(10, self.parent.playlist.check_show_playlist, self.show_title_entry.get())
 
 class UserConfigurationDialog(simpledialog.Dialog):
-    def __init__(self, parent, user_configuration):
-
-        # store initial values
-        self.configuration = user_configuration
-        self.show_title_entry = None
-        self.show_start_combo = None
+    def __init__(self, parent):
         self.ok_clicked = False
         super().__init__(parent, "Configuration")
 
     def body(self, master):
         tk.Label(master, text="Show Title:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
         self.show_title_entry = tk.Entry(master, width=40)
-        self.show_title_entry.insert(0, self.configuration.show_title)
+        self.show_title_entry.insert(0, UserConfiguration.show_title)
         self.show_title_entry.grid(row=0, column=1, padx=5, pady=5)
 
         tk.Label(master, text="Show Start:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
@@ -134,16 +131,37 @@ class UserConfigurationDialog(simpledialog.Dialog):
         ]
 
         self.show_start_combo['values'] = time_values
-        self.show_start_combo.set(time_values[self.configuration.show_start_time])
+        if UserConfiguration.show_start_time:
+            time_ar = UserConfiguration.show_start_time.split(' ')
+            hour = int(time_ar[0])
+            hour = 0 if hour == 12 and time_ar[1] == 'am' else hour
+            hour = hour + 12 if time_ar[1] == 'pm' and hour != 12 else hour
+            self.show_start_combo.set(time_values[hour])
 
+        tk.Label(master, text="User API Key:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
+        self.apikey_entry = tk.Entry(master, width=40)
+        self.apikey_entry.insert(0, UserConfiguration.user_apikey)
+        self.apikey_entry.grid(row=2, column=1, padx=5, pady=5)
 
         return self.show_title_entry  # focus on artist field by default
 
+    def validate(self):
+        keylen = len(self.apikey_entry.get())
+        is_okay = keylen == 0 or keylen == 32
+        if not is_okay:
+            tk.messagebox.showwarning(title="Error", message='The length of the User API Key entry is incorrect. This value should be 40 characters long.', parent=self)
+
+        return is_okay
+
+
     def apply(self):
         # When Save is clicked
+        # TODO: check length of the User API key
         self.ok_clicked = True
-        self.configuration.show_title = self.show_title_entry.get()
-        self.configuration.save_config()
+        UserConfiguration.show_title = self.show_title_entry.get()
+        UserConfiguration.user_apikey = self.apikey_entry.get()
+        UserConfiguration.show_start_time = self.show_start_combo.get()
+        UserConfiguration.save_config()
 
 class TrackEditDialog(simpledialog.Dialog):
     def __init__(self, parent, track):
@@ -152,6 +170,7 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_artist = track.artist
         self.track_title  = track.title
         self.track_album = track.album
+        self.track_label = track.label
         self.track_fcc_status = track.fcc_status
         self.track_fcc_comment = track.fcc_comment
         super().__init__(parent, "Edit Track")
@@ -165,8 +184,9 @@ class TrackEditDialog(simpledialog.Dialog):
         tk.Label(master, text="Artist:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
         tk.Label(master, text="Title:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
         tk.Label(master, text="Album:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-        tk.Label(master, text="FCC:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
-        tk.Label(master, text=self.track_fcc_comment).grid(row=4, column=1, sticky="w", padx=0, pady=0)
+        tk.Label(master, text="Label:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
+        tk.Label(master, text="FCC:").grid(row=4, column=0, sticky="e", padx=5, pady=5)
+        tk.Label(master, text=self.track_fcc_comment).grid(row=5, column=1, sticky="w", padx=0, pady=0)
 
         # Create entry fields with initial values
         self.artist_entry = tk.Entry(master, width=40)
@@ -178,6 +198,9 @@ class TrackEditDialog(simpledialog.Dialog):
         self.album_entry = tk.Entry(master, width=40)
         self.album_entry.insert(0, self.track_album)
 
+        self.label_entry = tk.Entry(master, width=40)
+        self.label_entry.insert(0, self.track_label)
+
         self.fcc_status_combo = ttk.Combobox(master, state="readonly", width=20)
         self.fcc_status_combo.insert(0, self.track_fcc_status)
         self.fcc_status_combo['values'] = FCCChecker.FCC_STATUS_AR
@@ -187,7 +210,8 @@ class TrackEditDialog(simpledialog.Dialog):
         self.artist_entry.grid(row=0, column=1, padx=5, pady=5)
         self.title_entry.grid(row=1, column=1, padx=5, pady=5)
         self.album_entry.grid(row=2, column=1, padx=5, pady=5)
-        self.fcc_status_combo.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+        self.label_entry.grid(row=3, column=1, padx=5, pady=5)
+        self.fcc_status_combo.grid(row=4, column=1, sticky='w', padx=5, pady=5)
 
         return self.artist_entry  # focus on artist field by default
 
@@ -197,6 +221,7 @@ class TrackEditDialog(simpledialog.Dialog):
         self.track_artist = self.artist_entry.get()
         self.track_title = self.title_entry.get()
         self.track_album = self.album_entry.get()
+        self.track_label = self.label_entry.get()
         self.track_fcc_status = self.fcc_status_combo.get()
 
 

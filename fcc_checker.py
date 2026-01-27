@@ -1,4 +1,4 @@
-import configuration
+from system_config import SystemConfig
 import os, sys
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -6,14 +6,34 @@ import lyricsgenius
 from djutils import logit
 
 
-def get_spotify_info(artist, title):
-    # --- Spotify setup ---
-    print(f"ID: {configuration.SPOTIFY_ID}, {configuration.SPOTIFY_SECRET}")
+def get_album_label(artist_name, album_name):
+    if not album_name or len(album_name) == 1:
+        return ''
 
     spotify = spotipy.Spotify(
         auth_manager=SpotifyClientCredentials(
-            client_id = configuration.SPOTIFY_ID, 
-            client_secret= configuration.SPOTIFY_SECRET
+            client_id = SystemConfig.spotify_id,
+            client_secret= SystemConfig.spotify_secret
+        )
+    )
+
+    search_type = "album"
+    results = spotify.search(q=f'album:{album_name} artist:{artist_name}', type='album', limit=1)
+    if not results["albums"] or not results["albums"]["items"]:
+        return None
+
+    item = results['albums']["items"][0]
+    album_id = item['id']
+    album_info = spotify.album(album_id)
+    album_label = album_info['label']
+    return album_label
+
+
+def get_spotify_info(artist, title):
+    spotify = spotipy.Spotify(
+        auth_manager=SpotifyClientCredentials(
+            client_id = SystemConfig.spotify_id, 
+            client_secret= SystemConfig.spotify_secret
         )
     )
 
@@ -32,14 +52,21 @@ def get_spotify_info(artist, title):
 
 #os.environ["GENIUS_ACCESS_TOKEN"],
 def get_lyrics_genius(normalized_artist: str, normalized_title: str) -> str:
-    genius = lyricsgenius.Genius(configuration.GENIUS_TOKEN, skip_non_songs=True, remove_section_headers=True)
+    retval = None
+    try:
+        artist_ar = normalized_artist.split(',')
+        primary_artist = normalized_artist if len(artist_ar) < 2 else artist_ar[0]
+        genius = lyricsgenius.Genius(SystemConfig.genius_apikey, skip_non_songs=True, remove_section_headers=True)
+        song = genius.search_song(
+            title=normalized_title,
+            artist=primary_artist,
+        )
+        retval =  song.lyrics if song else None
+    except Exception as ex:
+        logit(f"Error fetching Genius lyrics {normalized_title}, {ex}")
 
-    song = genius.search_song(
-        title=normalized_title,
-        artist=normalized_artist,
-    )
+    return retval
 
-    return song.lyrics if song else None
 
 class FCCChecker():
     FCC_STATUS_AR = ['CLEAN', 'DIRTY', 'NOT_FOUND', '-']
@@ -59,11 +86,15 @@ class FCCChecker():
     
             return FCCChecker.FCC_STATUS_AR[0], ''
 
-        explicit = get_spotify_info(artist, title)
-        if explicit:
-            msg = f'Spotify explicit flag'
-            logit(msg)
-            return FCCChecker.FCC_STATUS_AR[1], msg
+        try:
+            explicit = get_spotify_info(artist, title)
+            if explicit:
+                msg = f'Spotify explicit flag'
+                logit(msg)
+                return FCCChecker.FCC_STATUS_AR[1], msg
+        except Exception as ex:
+            logit(f"Error fetching Spotify info {title}, {ex}")
+
 
         return FCCChecker.FCC_STATUS_AR[2], ''
 
