@@ -23,7 +23,7 @@ from multiprocessing.process import parent_process
 from os.path import expanduser
 from pydub import AudioSegment
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog, PhotoImage
+from tkinter import ttk, filedialog, messagebox, simpledialog, PhotoImage, scrolledtext
 from tkinterdnd2 import TkinterDnD, DND_FILES
 from tkinter import PhotoImage
 
@@ -33,7 +33,7 @@ from fcc_checker import FCCChecker, get_album_label
 from djtool_dialogs import SelectAlbumDialog, LiveShowDialog, UserConfigurationDialog, TrackEditDialog
 from models import Track, ZKPlaylist, UserConfiguration
 from track_downloader import TrackDownloader, getTitlesYouTube
-from djutils import logit
+from djutils import logit, get_logfile_path
 
 
 def seconds_from_HMS(time_hms):
@@ -61,6 +61,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
           
         self.DEFAULT_TITLE = "DJ Tool"
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.log_window = None
 
         self.geometry("600x600")
         self.minsize(480, 360)
@@ -115,6 +116,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self.lift()
         self.focus_force()
 
+
     def _on_focus_in(self):
         self.have_focus = True
 
@@ -151,7 +153,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                     self.after(500, self._fetch_track_done(1))
                 else:
                     return
-            elif self.downloader.track.track_file:
+            elif self.downloader.track and self.downloader.track.file_path:
                 self._set_dirty(True)
                 self.url.delete(0, "end")
                 self.url.config(cursor="")
@@ -206,6 +208,10 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         editmenu.add_command(label="FCC Check", command=self.fcc_check)
         menubar.add_cascade(label="Edit", menu=editmenu)
 
+        viewmenu = tk.Menu(menubar, tearoff=0)
+        viewmenu.add_command(label="Log File", command=self.show_log_window)
+        menubar.add_cascade(label="View", menu=viewmenu)
+
         self.config(menu=menubar)
 
     def _build_topbar(self, rownum):
@@ -214,7 +220,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
         tk.Button(top, text="■", width=3, command=self.stop_audio).pack(side="left", padx=(6, 6), pady=2)
         tk.Button(top, text="▶", width=3, command=self.play_selected).pack(side="left", padx=(0, 12), pady=2)
-        tk.Checkbutton(top, text="Live", command=self.live_show_change, variable=self.live_show).pack(side="left", padx=(0, 12), pady=2)
+        tk.Checkbutton(top, text="Live Show", command=self.live_show_change, variable=self.live_show).pack(side="left", padx=(0, 12), pady=2)
 
         self.output_combo = ttk.Combobox(top, postcommand=self._refresh_output_devices, state="readonly", width=15)
         self.output_combo.pack(side="right", padx=(0, 6), pady=2)
@@ -370,11 +376,11 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
     def insert_pause(self):
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '', '', '', PAUSE_FILE, '', '', PAUSE_FILE, True)
+        self._insert_track(insert_index, '', '', '', Tack.PAUSE_FILE, '', '', Track.PAUSE_FILE, True)
 
     def insert_mic_break(self):
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '','', '', MIC_BREAK_FILE, '', '', MIC_BREAK_FILE, True)
+        self._insert_track(insert_index, '','', '', Track.MIC_BREAK_FILE, '', '', Track.MIC_BREAK_FILE, True)
 
 
     def edit_selected_track(self):
@@ -468,10 +474,10 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             self.tree.focus(items[0])
             return
         idx = items.index(sel[0])
-        new = max(0, min(len(items) - 1, idx + direction))
-        self.tree.selection_set(items[new])
-        self.tree.focus(items[new])
-        self.tree.see(items[new])
+        new_idx = max(0, min(len(items) - 1, idx + direction))
+        self.tree.selection_set(items[new_idx])
+        self.tree.focus(items[new_idx])
+        self.tree.see(items[new_idx])
 
     # ----- Insertion line helpers -----
     def _show_insert_line_at_row_top(self, row_id):
@@ -631,13 +637,14 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if insert_index == -1:
             insert_index = len(self.tree.get_children(""))
 
+        track = Track(-1, fcc_status, fcc_comment, artist, title, album, label, path, 0)
+
         tags = ()
-        if is_mic_break_file(title):
+        if track.is_mic_break_file():
             tags = ("break")
-        elif is_pause_file(title):
+        elif track.is_pause_file():
             tags = ("pause")
 
-        track = Track(-1, fcc_status, fcc_comment, artist, title, album, label, path, 0)
         track.id = self.tree.insert("", insert_index, values=(insert_index+1, track.duration, artist, title, track.album_display(), track.fcc_status), tags=tags)
         self.tree_datamap[track.id] = track
     
@@ -669,16 +676,6 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 i += 1
         normalized = "".join(buf)
         return shlex.split(normalized)
-
-    @staticmethod
-    def _is_spot_file(file_name):
-        is_spot = file_name.startswith("LID_") or file_name.startswith('PSA_') or file_name.startswith("PROMO_")
-        return is_spot
-
-    @staticmethod
-    def _is_audio_file(file_name):
-        is_audio = re.match('audio[0-9]+\.', file_name)
-        return is_audio
 
     # ======================= PLAYLIST SAVE/LOAD =======================
     def save_mp3(self):
@@ -736,15 +733,16 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         tk.messagebox.showwarning(title="MP3 File Saved", message=f'Playlist saved as {filename}', parent= self)
 
     def fcc_check(self):
-        for track in self.tree_datamap.values():
-            if not track.have_fcc_status() and not is_stop_file(track.title) and not is_spot_file(track.title):
-                status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
-                track.fcc_status = status
-                track.fcc_comment = comment
-                row_values = self.tree.item(track.id)["values"]
-                row_values = (*row_values[0:5], track.fcc_status_glyph())
-                self.tree.item(track.id, values=row_values)
-                self._set_dirty(True)
+        if SystemConfig.check_have_genius_key():
+            for track in self.tree_datamap.values():
+                if not track.have_fcc_status() and not track.is_stop_file() and not track.is_spot_file():
+                    status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
+                    track.fcc_status = status
+                    track.fcc_comment = comment
+                    row_values = self.tree.item(track.id)["values"]
+                    row_values = (*row_values[0:5], track.fcc_status_glyph())
+                    self.tree.item(track.id, values=row_values)
+                    self._set_dirty(True)
 
             
     # import audio files from a directory.
@@ -802,7 +800,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 t = self.tree_datamap[item]
                 tracks.append(t.to_dict())
                 file_name = os.path.basename(t.file_path).lower()
-                if self._is_audio_file(file_name):
+                if t.is_audio_file():
                    include_timestamps = True
 
             # write app playlist
@@ -811,7 +809,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
             # write Zookeeper playlist
             zk_tag = zk_label  = '-'
-            zk_filename = f'{fp[0:-4]}_zk.csv'
+            zk_filename = f'{fp[0:-4]}_zookeeper.csv'
             zk_file = open(zk_filename, "w", encoding="utf-8")
             zk_track_start = '\n'
             for item in self.tree.get_children(""):
@@ -822,13 +820,13 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 if include_timestamps:
                     zk_track_start = f'{track_start}\n'
 
-                if self._is_audio_file(file_name):
+                if t.is_audio_file():
                     # zookeeper needs all blanks for a break
                     zk_line = f"\t\t\t\t\t{zk_track_start}"
                 else:
                     zk_line = f"{t.artist}\t{t.title}\t{t.album}\t{zk_label}\t{zk_tag}\t{zk_track_start}"
 
-                    if not self._is_spot_file(file_name):
+                    if not t.is_spot_file():
                         zk_file.write(zk_line)
 
                     time_secs = time_secs + t.duration
@@ -838,9 +836,36 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             self._set_dirty(False)
         except Exception as e:
             logit(f"[Save] Error: {e}")
-            traceback.logit_exc()
+            traceback.print_exc()
 
         self._set_title()
+
+    def show_log_window(self):
+        if self.log_window and self.log_window.winfo_exists():
+            self.log_window.lift()
+            self.log_window.focus_force()
+            return
+
+        self.log_window = tk.Toplevel(self)
+        self.log_window.title("DJTool Log")
+        self.log_window.geometry("600x300")
+    
+        text_area = scrolledtext.ScrolledText(self.log_window, wrap=tk.WORD, width=60, height=30)
+        text_area.pack(expand=True, fill='both', padx=10, pady=10)
+    
+        log_file = get_logfile_path()
+        file_content = 'File not found.'
+        try:
+            with open(log_file, 'r', encoding='utf-8') as file:
+                file_content = file.read()
+        except Exception as e:
+            logit(f"Could not read log file: {log_file}, {e}")
+
+        text_area.insert(tk.INSERT,file_content)
+
+        close_button = tk.Button(self.log_window, text="Close", command=self.log_window.destroy)
+        close_button.pack(pady=10)
+
 
     def load_playlist(self, fp=False):
         if not fp:
@@ -907,11 +932,20 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
     def live_show_change(self):
         if self.live_show.get():
-            show_title = UserConfiguration.show_title
-            LiveShowDialog(self, show_title, "12 am")
+            if SystemConfig.check_have_user_key():
+                show_title = UserConfiguration.show_title
+                LiveShowDialog(self, show_title, "12 am")
+            else:
+                self.clear_live_show()
         else:
             pass #self.playlist.id = None
 
+    def clear_live_show(self):
+        self.live_show.set(False)
+
+    def check_show_playlist(self, show_title):
+        if not self.playlist.check_show_playlist(show_title):
+            self.live_show.set(False)
 
     def copy_selected_rows(self):
         selected_items = self.tree.selection()  # Get IDs of selected rows
@@ -931,26 +965,26 @@ class AudioPlaylistApp(TkinterDnD.Tk):
     
 
     def find_albums(self):
-        items = self.tree.get_children("")
-        for item in items:
-            track = self.tree_datamap[item]
-            if len(track.album) > 1 or self._is_spot_file(track.title) or is_stop_file(track.title):
-                continue
-
-            album_choices = getTitlesYouTube(track.artist, track.title)
-            if len(album_choices) == 1:
-                track.album = album_choices[0]
-            else:
-                dialog = SelectAlbumDialog(self,  track.artist, track.title, album_choices)
-                if dialog.ok_clicked:
-                    track.album = dialog.album
+        if SystemConfig.check_have_spotify_key():
+            for item in self.tree.get_children(""):
+                track = self.tree_datamap[item]
+                if len(track.album) > 1 or track.is_spot_file() or track.is_stop_file():
+                    continue
+    
+                album_choices = getTitlesYouTube(track.artist, track.title)
+                if len(album_choices) == 1:
+                    track.album = album_choices[0]
                 else:
-                    break
-
-            track.fetch_label()
-            row_values = self.tree.item(track.id)["values"]
-            row_values = (*row_values[0:2], track.artist, track.title, track.album, track.fcc_status_glyph())
-            self.tree.item(track.id, values=row_values)
+                    dialog = SelectAlbumDialog(self,  track.artist, track.title, album_choices)
+                    if dialog.ok_clicked:
+                        track.album = dialog.album
+                    else:
+                        break
+    
+                track.fetch_label()
+                row_values = self.tree.item(track.id)["values"]
+                row_values = (*row_values[0:2], track.artist, track.title, track.album, track.fcc_status_glyph())
+                self.tree.item(track.id, values=row_values)
 
 
     def on_double_click(self):
@@ -994,10 +1028,10 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self._track_id = id
         self._set_title(f"{index+1}: {track.artist} - {track.title}")
 
-        if is_stop_file(track.title):
+        if track.is_stop_file():
             self._paused = True
             self._set_countdown("")
-            if is_mic_break_file(track.title):
+            if track.is_mic_break_file():
                 self.playlist.send_track(track)
 
             return

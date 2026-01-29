@@ -3,6 +3,7 @@ import tkinter as tk
 
 from fcc_checker import FCCChecker
 from models import UserConfiguration
+from system_config import SystemConfig
 
 
 class SelectAlbumDialog(simpledialog.Dialog):
@@ -108,8 +109,12 @@ class LiveShowDialog(simpledialog.Dialog):
         box.pack()
 
     def apply(self):
-        # When Save is clicked
-        self.parent.after(10, self.parent.playlist.check_show_playlist, self.show_title_entry.get())
+        self.parent.check_show_playlist(self.show_title_entry.get())
+
+    def cancel(self, event=None):
+        # This is called when 'Cancel' is pressed or window is closed
+        self.parent.clear_live_show()
+        super().cancel(event)
 
 class UserConfigurationDialog(simpledialog.Dialog):
     def __init__(self, parent):
@@ -155,12 +160,18 @@ class UserConfigurationDialog(simpledialog.Dialog):
 
 
     def apply(self):
-        # When Save is clicked
-        # TODO: check length of the User API key
         self.ok_clicked = True
+        update_system_apikey = SystemConfig.user_apikey == UserConfiguration.user_apikey
+
         UserConfiguration.show_title = self.show_title_entry.get()
         UserConfiguration.user_apikey = self.apikey_entry.get()
         UserConfiguration.show_start_time = self.show_start_combo.get()
+
+        # update iff using the user key as the system key.
+        if update_system_apikey:
+            SystemConfig.user_apikey = UserConfiguration.user_apikey
+            SystemConfig.load_config(UserConfiguration.user_apikey)
+
         UserConfiguration.save_config()
 
 class TrackEditDialog(simpledialog.Dialog):

@@ -9,8 +9,8 @@ included in the user's $PATH.
 
 ## Requirements
    - Python 3.9+
-   - yt-dlp 2025.10.22+
-   - portaudio
+   - yt-dlp 2025.10.22+ (YT downloader)
+   - portaudio (audio player helper)
    - ffmpeg (required if exporting program to MP3)
 
 ## Setup
@@ -68,10 +68,6 @@ Best to use homebrew but you will need to use MacPorts if you have an older OS.
    - brew install ffmpeg
 
 One advantage of installing yt-dlp directly from the project gitbhub repo is that from it you can upgrade to the latest version by executing 'yt-dlp -U'. This self upgrade is not possible with versions installed via a pacakage manager which may not contain the newest version.
-
-XXXXX
-remove audioioop-ltd if older python
-remove configuration.py import
 
 After installing the helper tools, install DJTool as follows:
    - check your default system Python using 'python3 --version

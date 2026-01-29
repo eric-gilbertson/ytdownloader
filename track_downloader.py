@@ -90,17 +90,18 @@ class TrackDownloader():
 
         cmd = self.YTDL_PATH + ' --extract-audio --audio-format wav -o {} {}'.format(out_file, self.track_url)
         self.is_done = False
+        logit(f"Start download: {cmd}")
         self.download_thread = CommandThread(cmd, self.on_fetch_done)
         self.download_thread.start()
         return True
 
     def on_fetch_done(self):
         self.err_msg = str(self.download_thread.stderr)
+        stdOut = self.download_thread.stdout.decode('UTF-8')
 
         if self.err_msg.find('File name too long') > 0:
             self.name_too_long = True
         elif self.download_thread.process.returncode == 0:
-            stdOut = self.download_thread.stdout.decode('UTF-8')
             idx1 = stdOut.rfind("Destination: ") + 13
             idx2 = stdOut.find(".wav", idx1)
             if idx1 > 13 and idx2 > idx1:
@@ -110,6 +111,8 @@ class TrackDownloader():
                 self.track.album = self.track_album
                 (self.track.track_file, self.track.artist, self.track.title)  = self.clean_filepath(self.track.track_file)
                 trim_audio(self.track.track_file)
+        else:
+            logit(f"yt-dlp download error: {stdOut}, {self.err_msg}")
 
         self.is_done = True
 

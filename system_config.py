@@ -1,5 +1,6 @@
 import json
 import ssl
+import tkinter.messagebox
 import urllib
 from  tkinter import messagebox
 from djutils import logit
@@ -44,3 +45,39 @@ class SystemConfig():
                         SystemConfig.genius_apikey = resp_obj.get('genius_apikey', None)
             except Exception as e:
                     logit(f"Exception geting apikeys, {e}")
+
+    @staticmethod
+    def check_have_user_key():
+        msg = None
+        if not SystemConfig.user_apikey:
+            msg = '''This feature is not be available because your user
+                apikey has not been set. Set it by visiting https://kzsu.stanford.edu/internal/profile
+                and clicking the Add Key button. Then copy the generated key and paste it into the User API Key
+                field in the user configuration dialog which is accessed by clicking File->Configure...'''
+
+            tkinter.messagebox.showwarning("Configuration Error", msg)
+
+        return not msg
+
+    @staticmethod
+    def check_have_spotify_key():
+        msg = None
+        if not SystemConfig.spotify_id or not SystemConfig.spotify_secret:
+            msg = '''This feature is not available because the Spotify
+                 apikeys have not been set. Check that your user key in the File->Configuration
+                 dialog matches the api key at https://kzsu.stanford.edu/internal/profile'''
+
+            tkinter.messagebox.showwarning("Configuration Error", msg)
+
+        return not msg
+
+    def check_have_genius_key():
+        msg = None
+        if not SystemConfig.spotify_id or not SystemConfig.spotify_secret:
+            msg = '''This feature is not available because the Genius
+                 apikey has not been set. Check that your user key in the File->Configuration
+                 dialog matches the api key at https://kzsu.stanford.edu/internal/profile'''
+
+            tkinter.messagebox.showwarning("Configuration Error", msg)
+
+        return not msg

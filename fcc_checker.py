@@ -10,47 +10,56 @@ def get_album_label(artist_name, album_name):
     if not album_name or len(album_name) == 1:
         return ''
 
-    spotify = spotipy.Spotify(
-        auth_manager=SpotifyClientCredentials(
-            client_id = SystemConfig.spotify_id,
-            client_secret= SystemConfig.spotify_secret
+    album_label = ''
+    try:
+        spotify = spotipy.Spotify(
+            auth_manager=SpotifyClientCredentials(
+                client_id = SystemConfig.spotify_id,
+                client_secret= SystemConfig.spotify_secret
+            )
         )
-    )
 
-    search_type = "album"
-    results = spotify.search(q=f'album:{album_name} artist:{artist_name}', type='album', limit=1)
-    if not results["albums"] or not results["albums"]["items"]:
-        return None
+        results = spotify.search(q=f'album:{album_name} artist:{artist_name}', type='album', limit=1)
+        if not results["albums"] or not results["albums"]["items"]:
+            return None
 
-    item = results['albums']["items"][0]
-    album_id = item['id']
-    album_info = spotify.album(album_id)
-    album_label = album_info['label']
+        item = results['albums']["items"][0]
+        album_id = item['id']
+        album_info = spotify.album(album_id)
+        album_label = album_info['label']
+
+    except Exception as ex:
+        logit(f"Exception getting album label from spotify {ex}")
+
     return album_label
 
 
 def get_spotify_info(artist, title):
-    spotify = spotipy.Spotify(
-        auth_manager=SpotifyClientCredentials(
-            client_id = SystemConfig.spotify_id, 
-            client_secret= SystemConfig.spotify_secret
+    is_explicit = None
+    try:
+        spotify = spotipy.Spotify(
+            auth_manager=SpotifyClientCredentials(
+                client_id = SystemConfig.spotify_id, 
+                client_secret= SystemConfig.spotify_secret
+            )
         )
-    )
+    
+        # Search Spotify to normalize artist/title
+        query = f"track:{title} artist:{artist}"
+        results = spotify.search(q=query, type="track", limit=1)
+    
+        if not results["tracks"]["items"]:
+            return None
+    
+        track = results["tracks"]["items"][0]
+        normalized_title = track["name"]
+        normalized_artist = track["artists"][0]["name"]
+        is_explicit = track['explicit']
+    except Exception as ex:
+        logit(f"Exception getting album explicit from spotify {ex}")
 
-    # Search Spotify to normalize artist/title
-    query = f"track:{title} artist:{artist}"
-    results = spotify.search(q=query, type="track", limit=1)
-
-    if not results["tracks"]["items"]:
-        return None
-
-    track = results["tracks"]["items"][0]
-    normalized_title = track["name"]
-    normalized_artist = track["artists"][0]["name"]
-    is_explicit = track['explicit']
     return is_explicit
 
-#os.environ["GENIUS_ACCESS_TOKEN"],
 def get_lyrics_genius(normalized_artist: str, normalized_title: str) -> str:
     retval = None
     try:

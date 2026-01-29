@@ -1,6 +1,7 @@
 import datetime, os, ssl
 import json
 import pathlib
+import re
 import time
 import urllib
 import tkinter as tk
@@ -18,6 +19,9 @@ from fcc_checker import get_album_label
 
 
 class Track():
+    PAUSE_FILE = 'PAUSE'
+    MIC_BREAK_FILE = 'MIC_BREAK'
+
     FCC_STATUS_IMAGE = {"CLEAN" : '✅', 'DIRTY': '⛔', 'NOT_FOUND': '✋'}
 
     def __init__(self, id=-1, fcc_status='', fcc_comment='', artist='', title='', album='',  label='', file_path='', duration=0):
@@ -56,6 +60,26 @@ class Track():
     def fcc_status_glyph(self):
         glyph = self.FCC_STATUS_IMAGE.get(self.fcc_status, self.fcc_status)
         return glyph
+
+    def is_spot_file(self):
+        is_spot = self.file_path.startswith("LID_") or self.file_path.startswith('PSA_') or self.file_path.startswith("PROMO_")                 
+        return is_spot
+                
+    def is_audio_file(self):
+        is_audio = re.match('audio[0-9]+\.', self.file_path)
+        return is_audio
+
+    def is_stop_file(self):
+        return self.title == Track.PAUSE_FILE or self.title == Track.MIC_BREAK_FILE
+    
+    def is_mic_break_file(self):
+        return self.title == Track.MIC_BREAK_FILE
+    
+    def is_pause_file(self):
+        return self.title == Track.PAUSE_FILE
+    
+    def is_spot_file(self):
+        return self.title.startswith("LID_") or self.title.startswith("PSA_") or self.title.startswith("PROMO_")
 
     @staticmethod
     def from_dict(track_dict):
@@ -101,13 +125,13 @@ class ZKPlaylist():
 
     def send_track_zookeeper(self, track):
         start_time = time.time_ns()
-        if not self.id or not self._is_active() or is_pause_file(track.title) or track.title.startswith("LID_"):
+        if not self.id or not self._is_active() or track.is_pause_file(track.title) or track.title.startswith("LID_"):
             logit(f"skip send_track {self.id}, {self._is_active()}")
             return
 
         url = SystemConfig.zookeeper_host + f'/api/v2/playlist/{self.id}/events'
         method = "POST"  # timestamp this track
-        event_type = 'break' if is_mic_break_file(track.title) else 'spin'
+        event_type = 'break' if track.is_mic_break_file(track.title) else 'spin'
         event = {
             "type": "event",
             "attributes": {
@@ -138,13 +162,13 @@ class ZKPlaylist():
 
     def send_track(self, track):
         start_time = time.time_ns()
-        if not self.id or not self._is_active() or is_pause_file(track.title) or track.title.startswith("LID_"):
+        if not self.id or not self._is_active() or track.is_pause_file(track.title) or track.title.startswith("LID_"):
             logit(f"skip send_track {self.id}, {self._is_active()}")
             return
 
         url = SystemConfig.playlist_host + f'/djtool/addtrack/'
         apikey = SystemConfig.user_apikey
-        event_type = 'break' if is_mic_break_file(track.title) else 'spin'
+        event_type = 'break' if track.is_mic_break_file(track.title) else 'spin'
         data =  {
                 "id": self.id,
                 "type": event_type,
@@ -195,6 +219,10 @@ class ZKPlaylist():
                     tk.messagebox.showwarning(title="Info", message=msg)
         except Exception as e:
             logit(f"Exception getting playlist: {url}, {e})")
+            msg = f"Exception while checking playlist. Use File->Configuration to check that your user api key is correct. {e}, {url}"
+            tk.messagebox.showwarning(title="Error", message=msg, parent=self.parent)
+            return False
+
 
         if not self.id:
             self.parent.live_show.set(False)
