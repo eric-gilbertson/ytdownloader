@@ -17,6 +17,7 @@ VLC like media player optimized for use in live radio features include:
 """
 import glob,  pathlib,  shutil,  time, os, pyaudio, json, re, datetime, yaml
 import math, os, shlex, socket, ssl, threading, traceback, urllib.request
+import platform
 import sys
 from urllib.parse import unquote
 from multiprocessing.process import parent_process
@@ -52,12 +53,13 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         super().__init__()
 
         # ---- macOS Dock reopen handler ----
-        dock_icon = PhotoImage(file='./djtool.png')
-        self.iconphoto(True, dock_icon)
-        self.createcommand(
-            "tk::mac::ReopenApplication",
-            self.on_dock_reopen
-        )
+        if platform.system() == 'Darwin':
+            dock_icon = PhotoImage(file='./djtool.png')
+            self.iconphoto(True, dock_icon)
+            self.createcommand(
+                "tk::mac::ReopenApplication",
+                self.on_dock_reopen
+            )
           
         self.DEFAULT_TITLE = "DJ Tool"
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -153,7 +155,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                     self.after(500, self._fetch_track_done(1))
                 else:
                     return
-            elif self.downloader.track and self.downloader.track.file_path:
+            elif self.downloader.track and self.downloader.track.track_file:
                 self._set_dirty(True)
                 self.url.delete(0, "end")
                 self.url.config(cursor="")
@@ -376,7 +378,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
     def insert_pause(self):
         insert_index = self._get_selected_index()
-        self._insert_track(insert_index, '', '', '', Tack.PAUSE_FILE, '', '', Track.PAUSE_FILE, True)
+        self._insert_track(insert_index, '', '', '', Track.PAUSE_FILE, '', '', Track.PAUSE_FILE, True)
 
     def insert_mic_break(self):
         insert_index = self._get_selected_index()
@@ -793,7 +795,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
         self.playlist_file = fp
         try:
-            time_secs = 0
+            time_secs = UserConfiguration.get_show_start_seconds()
             include_timestamps = False
             tracks = []
             for item in self.tree.get_children(""):
@@ -809,7 +811,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
             # write Zookeeper playlist
             zk_tag = zk_label  = '-'
-            zk_filename = f'{fp[0:-4]}_zookeeper.csv'
+            zk_filename = f'{fp[0:-5]}_zookeeper.csv'
             zk_file = open(zk_filename, "w", encoding="utf-8")
             zk_track_start = '\n'
             for item in self.tree.get_children(""):
@@ -820,16 +822,16 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 if include_timestamps:
                     zk_track_start = f'{track_start}\n'
 
-                if t.is_audio_file():
+                if t.is_audio_file() or t.is_mic_break_file() or t.is_pause_file():
                     # zookeeper needs all blanks for a break
                     zk_line = f"\t\t\t\t\t{zk_track_start}"
                 else:
                     zk_line = f"{t.artist}\t{t.title}\t{t.album}\t{zk_label}\t{zk_tag}\t{zk_track_start}"
 
-                    if not t.is_spot_file():
-                        zk_file.write(zk_line)
+                if not t.is_spot_file():
+                    zk_file.write(zk_line)
 
-                    time_secs = time_secs + t.duration
+                time_secs = time_secs + t.duration
 
             zk_file.close()
 
@@ -1090,7 +1092,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             stream.stop_stream()
             stream.close()
         except Exception as ex:
-            logit("[Playback error]", ex)
+            logit(f"Playback error: {ex}")
         finally:
             try:
                 pa.terminate()
