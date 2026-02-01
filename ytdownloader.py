@@ -150,7 +150,7 @@ class ControlPanel(object):
             if self.downloader.name_too_long:
                 if tk.messagebox.showwarning(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name'):
                     self._fetch_url_start(False)
-            elif self.downloader.track.track_file:
+            elif self.downloader.track.file_path:
                 control_panel.url.delete(0, "end")
                 control_panel.url.config(cursor="")
                 control_panel.url.update()
@@ -159,8 +159,8 @@ class ControlPanel(object):
                 if len(new_track.artist) == 0 or len(new_track.title) == 0:
                     self.downloader.edit_track(root, new_track)
 
-                file_name = os.path.basename(new_track.track_file)
-                self.list_widget.tree.insert('', 'end', iid=new_track.track_file, text=file_name, values=(['x', file_name]))
+                file_name = os.path.basename(new_track.file_path)
+                self.list_widget.tree.insert('', 'end', iid=new_track.file_path, text=file_name, values=(['x', file_name]))
             else:
                 tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg)
 

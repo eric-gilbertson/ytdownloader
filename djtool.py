@@ -155,7 +155,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                     self.after(500, self._fetch_track_done(1))
                 else:
                     return
-            elif self.downloader.track and self.downloader.track.track_file:
+            elif  self.downloader.download_file:
                 self._set_dirty(True)
                 self.url.delete(0, "end")
                 self.url.config(cursor="")
@@ -168,7 +168,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
                 track.fetch_label()
 
-                self._insert_track(-1, status, comment, track.artist, track.title, track.album, track.label, track.track_file, True)
+                self._insert_track(-1, status, comment, track.artist, track.title, track.album, track.label, track.file_path, True)
             else:
                 tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg, parent=self)
 

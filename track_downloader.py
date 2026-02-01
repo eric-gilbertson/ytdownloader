@@ -39,7 +39,7 @@ class TrackDownloader():
         self.err_msg = ''
         self.track = Track(-1, '', '', '', '', '', '', '', 0)
         self.track_url = ''
-        self.track_file = None
+        self.download_file = None
         self.track_album = ''
         self.is_done = False
 
@@ -72,7 +72,8 @@ class TrackDownloader():
             title = track_specifier_ar[1]
             tracks = getTracksYouTube(artist, title)
             if len(tracks) == 0:
-                tk.messagebox.showwarning(title="Error", message=f"Nothing found for -{title}- by -{artist}-", parent=self.parent)
+                msg = f"Nothing found for -{title}- by -{artist}-. Note that the format for song lookup is <ARTIST>;<TITLE>. The names do not have to be complete but they must be spelled correctly."
+                tk.messagebox.showwarning(title="Error", message=msg)
                 return False
             else:
                 dialog = SelectTrackDialog(parent, artist, title, tracks)
@@ -106,11 +107,11 @@ class TrackDownloader():
             idx2 = stdOut.find(".wav", idx1)
             if idx1 > 13 and idx2 > idx1:
                 self.errMsg = ''
-                self.track.track_file =  stdOut[idx1:idx2+4]
-                logit("Downloaded file: " + self.track.track_file)
+                self.download_file =  stdOut[idx1:idx2+4]
+                logit("Downloaded file: " + self.download_file)
                 self.track.album = self.track_album
-                (self.track.track_file, self.track.artist, self.track.title)  = self.clean_filepath(self.track.track_file)
-                trim_audio(self.track.track_file)
+                (self.track.file_path, self.track.artist, self.track.title)  = self.clean_filepath(self.download_file)
+                trim_audio(self.download_file)
         else:
             logit(f"yt-dlp download error: {stdOut}, {self.err_msg}")
 
@@ -207,11 +208,11 @@ class TrackDownloader():
             track.artist = dialog.track_artist
             track.title = dialog.track_title
             track.album = dialog.track_album
-            unused, suffix = os.path.splitext(track.track_file)
+            unused, suffix = os.path.splitext(track.file_path)
 
-            new_file = f"{os.path.dirname(track.track_file)}/{track.artist} {FIELD_SEPARATOR} {track.title}{suffix}"
-            os.rename(track.track_file, new_file)
-            track.track_file = new_file
+            new_file = f"{os.path.dirname(track.file_path)}/{track.artist} {FIELD_SEPARATOR} {track.title}{suffix}"
+            os.rename(track.file_path, new_file)
+            track.file_path = new_file
 
             #row_values = self.tree.item(track.id)["values"]
             #row_values = (*row_values[0:2], track.artist, track.title, track.album)
