@@ -10,6 +10,7 @@ SPOTIFY_SECRET = ''
 GENIUS_APIKEY = ''
 PLAYLIST_APIKEY = ''
 PLAYLIST_HOST = 'https://kzsu.stanford.edu'
+#PLAYLIST_HOST = 'http://localhost:5000' ####################
 
 class SystemConfig():
     spotify_id = SPOTIFY_ID
@@ -44,7 +45,11 @@ class SystemConfig():
                     if not SystemConfig.genius_apikey:
                         SystemConfig.genius_apikey = resp_obj.get('genius_apikey', None)
             except Exception as e:
-                    logit(f"Exception geting apikeys, {e}")
+                logit(f"Exception geting apikeys, {e}")
+                msg = '''FCC checking and album lookup will not available because the helper keys are not available.
+                     Check that your user key in the File->Configuration
+                     dialog matches the api key at https://kzsu.stanford.edu/internal/profile'''
+                tkinter.messagebox.showwarning("Configuration Error", msg)
 
     @staticmethod
     def check_have_user_key():
@@ -73,7 +78,7 @@ class SystemConfig():
 
     def check_have_genius_key():
         msg = None
-        if not SystemConfig.spotify_id or not SystemConfig.spotify_secret:
+        if not SystemConfig.genius_apikey:
             msg = '''This feature is not available because the Genius
                  apikey has not been set. Check that your user key in the File->Configuration
                  dialog matches the api key at https://kzsu.stanford.edu/internal/profile'''
