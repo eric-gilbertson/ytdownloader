@@ -111,7 +111,7 @@ class TrackDownloader():
                 logit("Downloaded file: " + self.download_file)
                 self.track.album = self.track_album
                 (self.track.file_path, self.track.artist, self.track.title)  = self.clean_filepath(self.download_file)
-                trim_audio(self.download_file)
+                trim_audio(self.track.file_path)
         else:
             logit(f"yt-dlp download error: {stdOut}, {self.err_msg}")
 
