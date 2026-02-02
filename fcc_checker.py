@@ -7,7 +7,9 @@ from djutils import logit
 
 
 def get_album_label(artist_name, album_name):
-    if not album_name or len(album_name) == 1:
+    have_keys = SystemConfig.spotify_id and SystemConfig.spotify_secret
+
+    if not have_keys or not album_name or len(album_name) == 1:
         return ''
 
     album_label = ''
@@ -36,6 +38,9 @@ def get_album_label(artist_name, album_name):
 
 def get_spotify_info(artist, title):
     is_explicit = None
+    if not SystemConfig.spotify_id or not SystemConfig.spotify_secret:
+        return None
+
     try:
         spotify = spotipy.Spotify(
             auth_manager=SpotifyClientCredentials(
@@ -62,6 +67,9 @@ def get_spotify_info(artist, title):
 
 def get_lyrics_genius(normalized_artist: str, normalized_title: str) -> str:
     retval = None
+    if not SystemConfig.genius_apikey:
+        return None
+
     try:
         artist_ar = normalized_artist.split(',')
         primary_artist = normalized_artist if len(artist_ar) < 2 else artist_ar[0]

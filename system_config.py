@@ -46,9 +46,7 @@ class SystemConfig():
                         SystemConfig.genius_apikey = resp_obj.get('genius_apikey', None)
             except Exception as e:
                 logit(f"Exception geting apikeys, {e}")
-                msg = '''FCC checking and album lookup will not available because the helper keys are not available.
-                     Check that your user key in the File->Configuration
-                     dialog matches the api key at https://kzsu.stanford.edu/internal/profile'''
+                msg = '''FCC checking and album lookup are not available because the helper keylookup failed.  Check that your user key in the File->Configuration dialog matches the api key at https://kzsu.stanford.edu/internal/profile'''
                 tkinter.messagebox.showwarning("Configuration Error", msg)
 
     @staticmethod
