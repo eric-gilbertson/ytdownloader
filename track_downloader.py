@@ -192,7 +192,7 @@ class TrackDownloader():
         new_file = f"{os.path.dirname(filepath)}/{new_name}{name_extension}"
 
         if new_file != filepath:
-            os.rename(filepath, new_file)
+            os.replace(filepath, new_file)
     
         Path(new_file).touch()
         return (new_file, artist, title)
@@ -211,7 +211,7 @@ class TrackDownloader():
             unused, suffix = os.path.splitext(track.file_path)
 
             new_file = f"{os.path.dirname(track.file_path)}/{track.artist} {FIELD_SEPARATOR} {track.title}{suffix}"
-            os.rename(track.file_path, new_file)
+            os.replace(track.file_path, new_file)
             track.file_path = new_file
 
             #row_values = self.tree.item(track.id)["values"]

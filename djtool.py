@@ -188,10 +188,11 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
         # MacOS magic to remove Python entry in the menubar. must be done in exactly
         # this order.
-        dummy_header = tk.Menu(menubar, name='apple')
-        menubar.add_cascade(menu=dummy_header)
-        self.config(menu=menubar)
-        dummy_header.destroy()
+        if platform.system() == 'Darwin':
+            dummy_header = tk.Menu(menubar, name='apple')
+            menubar.add_cascade(menu=dummy_header)
+            self.config(menu=menubar)
+            dummy_header.destroy()
 
         filemenu = tk.Menu(menubar, tearoff=0)
         filemenu.add_command(label="Configure...", command=self._edit_configuration)
