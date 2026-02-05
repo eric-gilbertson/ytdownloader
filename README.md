@@ -83,13 +83,17 @@ After installing the helper tools, install DJTool as follows:
 Use the following optional steps in order to add a desktop icon for invoking DJTool from the desktop
    - unzip djtool.app.zip -d ~/Desktop
    - edit ~/Desktop/DJTool.app/Contents/document.wflow
-   - under Run Shell Script edit COMMAND_STRING to point to the project directory, e.g. cd /Users/<USER_NAME>/src/djtool; ./venv/bin/python3.9 ./djtool
+   - replace <INSTALL_DIR> installation directory path, e.g. cd /Users/<USER_NAME>/src/djtool; ./venv/bin/python3 ./djtool
    - open djtool.png in Preview and copy the image
    - RC on the DJtool desktop icon and click info (info dialog will appear)
    - click on the thumbnail image in the upper/left corner and paste the new image
    - close info dialog (DJTool icon should now display)
    - test: double click in the djtool icon
 
+
+FAQ:
+# yt-dlp is installed but DJTool doesn't see it
+> The user's PATH variable must point to yt-dlp in order for DJTool to find it. On Macs this cacan be done by adding the yt-dlp path (typically /opt/local/bin) to /etc/paths. 
 
 TODO:
 create ~/Music/ytdl if not exist

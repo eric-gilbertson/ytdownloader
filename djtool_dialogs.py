@@ -89,7 +89,7 @@ class LiveShowDialog(simpledialog.Dialog):
         super().__init__(parent, "Live Show Info")
 
     def body(self, master):
-        info_msg = "Enter the name of your Zookeeper playlist. Note that playlist must be created in Zookeeper in order to complete this operation."
+        info_msg = "Enter the name of your Zookeeper playlist. Note that playlist must be created in Zookeeper before performing this operation."
 
         tk.Label(master, text=info_msg, wraplength=450, justify=tk.LEFT).grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
 
@@ -113,7 +113,6 @@ class LiveShowDialog(simpledialog.Dialog):
 
     def cancel(self, event=None):
         # This is called when 'Cancel' is pressed or window is closed
-        self.parent.clear_live_show()
         super().cancel(event)
 
 class UserConfigurationDialog(simpledialog.Dialog):

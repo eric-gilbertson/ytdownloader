@@ -52,14 +52,22 @@ class AudioPlaylistApp(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
 
-        # ---- macOS Dock reopen handler ----
         if platform.system() == 'Darwin':
+            # ---- macOS Dock reopen handler ----
             dock_icon = PhotoImage(file='./djtool.png')
             self.iconphoto(True, dock_icon)
             self.createcommand(
                 "tk::mac::ReopenApplication",
                 self.on_dock_reopen
             )
+
+            # if invoked from the desktop then the PATH will be limited so we append
+            # the expected locations for yt-dlp and ffmpeg.
+            EXTRA_PATHS = [ "/opt/local/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+            current_path = os.environ.get("PATH", "")
+            if EXTRA_PATHS[0] not in current_path:
+               logit("adding extra paths to PATH")
+               os.environ["PATH"] = ":".join(EXTRA_PATHS + [current_path])
           
         self.DEFAULT_TITLE = "DJ Tool"
         self.protocol("WM_DELETE_WINDOW", self._on_close)
