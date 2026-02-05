@@ -1016,10 +1016,10 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self.play_selected()
 
     def play_selected(self):
-        if not (sel := self.tree.selection()):
-            return
+        idx = 0
+        if sel := self.tree.selection():
+            idx = self.tree.index(sel[0])
 
-        idx = self.tree.index(sel[0])
         logit(f"play selected: {idx}")
         self._play_index(idx)
 

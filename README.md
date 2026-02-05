@@ -95,6 +95,9 @@ FAQ:
 # yt-dlp is installed but DJTool doesn't see it
 > The user's PATH variable must point to yt-dlp in order for DJTool to find it. On Macs this cacan be done by adding the yt-dlp path (typically /opt/local/bin) to /etc/paths. 
 
+# Get Unable to obtain version info ([SSL: CERTIFICATE_VERIFY_FAILED] on download
+> Likely that system certs need updating. Fix on Mac by double clicking /Applications/Python X.XX/Install Certificates.command
+
 TODO:
 create ~/Music/ytdl if not exist
 don't translate '-' that are part of file path, e.g. kzsu-archiver
