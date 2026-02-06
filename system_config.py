@@ -10,7 +10,7 @@ SPOTIFY_SECRET = ''
 GENIUS_APIKEY = ''
 PLAYLIST_APIKEY = ''
 PLAYLIST_HOST = 'https://kzsu.stanford.edu'
-#PLAYLIST_HOST = 'http://localhost:5000' ####################
+OUTPUT_DEVICE = ''
 
 class SystemConfig():
     spotify_id = SPOTIFY_ID
@@ -18,8 +18,7 @@ class SystemConfig():
     genius_apikey = GENIUS_APIKEY
     user_apikey = PLAYLIST_APIKEY
     playlist_host = PLAYLIST_HOST
-#    zookeeper_host = ZOOKEEPER_HOST
-#    zookeeper_apikey = ZOOKEEPER_APIKEY
+    output_device = OUTPUT_DEVICE
 
     @staticmethod
     def load_config(user_apikey_arg):

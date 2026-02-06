@@ -81,6 +81,10 @@ class Track():
     def is_spot_file(self):
         return self.title.startswith("LID_") or self.title.startswith("PSA_") or self.title.startswith("PROMO_")
 
+    def is_downloaded_file(self):
+        is_downloaded = DJT_DOWNLOAD_BASE in self.file_path
+        return is_downloaded
+
     @staticmethod
     def from_dict(track_dict):
         track = Track()
@@ -284,7 +288,7 @@ class UserConfiguration():
             pass
 
         UserConfiguration.show_title = config_dict.get('show_title', '')
-        UserConfiguration.show_start_time = config_dict.get('show_start_time', 0)
+        UserConfiguration.show_start_time = config_dict.get('show_start_time', '')
         UserConfiguration.playlist_host = config_dict.get('playlist_host', '')
         UserConfiguration.user_apikey = config_dict.get('user_apikey', '')
 

@@ -1,1 +1,10 @@
+__pycache__/**
 venv/**
+*.swp
+.DS_Store
+.cache
+.idea/**
+.vscode/**
+build/**
+dist/**
+

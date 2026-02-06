@@ -154,8 +154,8 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if not self.downloader.is_done:
             self.after(500, self._fetch_track_done, 1)
         else:
-            self.bell()
             if self.downloader.name_too_long:
+                self.bell()
                 if tk.messagebox.askokcancel(title='Error', message='Artist name too long. Click Okay to download using UNKNOWN for the artist name', parent=self):
                     self.downloader.is_done = False
                     self.downloader.name_too_long = False
@@ -165,22 +165,22 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                     return
             elif  self.downloader.download_file:
                 self._set_dirty(True)
-                self.url.delete(0, "end")
-                self.url.config(cursor="")
-                self.url.update()
-    
-                #append track to current list
                 track = self.downloader.track
 
                 # TODO: do these in background
                 status, comment = FCCChecker.fcc_song_check(track.artist, track.title)
                 track.fetch_label()
 
+                self.url.delete(0, "end")
+                self.url.config(cursor="")
+                self.url.update()
+                self.bell()
                 self._insert_track(-1, status, comment, track.artist, track.title, track.album, track.label, track.file_path, True)
             else:
+                self.bell()
                 tk.messagebox.showwarning(title='Error', message=self.downloader.err_msg, parent=self)
 
-                
+
     def _edit_configuration(self):
         dialog = UserConfigurationDialog(self)
     
@@ -338,23 +338,30 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             return []
         pa = pyaudio.PyAudio()
         out = []
+        default_output_lc = SystemConfig.output_device.lower()
+        default_idx = internal_idx = -1
         try:
+            out_idx = 0
             for i in range(pa.get_device_count()):
                 info = pa.get_device_info_by_index(i)
                 if info.get("maxOutputChannels", 0) > 0:
-                    out.append((i, info.get("name", f"Device {i}")))
+                    name = info.get("name")
+                    name_lc = name.lower()
+                    if name_lc == default_output_lc:
+                        default_idx = out_idx
+                    elif ("internal" in name_lc) or ("built-in" in name_lc) or ("builtin" in name_lc):
+                        internal_idx = out_idx
+
+                    out.append((i, name))
+                    out_idx = out_idx + 1
         finally:
             pa.terminate()
 
-        # Try to promote internal/built-in to first entry
-        def is_internal(name: str) -> bool:
-            n = name.lower()
-            return ("internal" in n) or ("built-in" in n) or ("builtin" in n)
 
-        internal = [d for d in out if is_internal(d[1])]
-        others = [d for d in out if not is_internal(d[1])]
-        if internal:
-            out = internal[:1] + others
+        if default_idx >= 0 or internal_idx >= 0: 
+            idx = default_idx if default_idx > 0 else internal_idx
+            out.insert(0, out.pop(idx))
+
         return out
 
     def _refresh_output_devices(self, event=None):
@@ -362,7 +369,8 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if devices != self.output_devices:
             old = self.output_combo.get()
             self.output_devices = devices
-            self.output_combo["values"] = [name for _, name in devices]
+            values_list = [name for _, name in devices]
+            self.output_combo["values"] = values_list
             if old and old in self.output_combo["values"]:
                 self.output_combo.set(old)
             elif devices:
@@ -469,7 +477,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             for item_id in self.tree.selection():
                 self.tree.delete(item_id)
                 track = self.tree_datamap.pop(item_id, None)
-                if response and os.path.exists(track.file_path):
+                if response and os.path.exists(track.file_path) and track.is_downloaded_file():
                     os.remove(track.file_path)
   
             self._renumber_rows()

@@ -2,7 +2,9 @@ from os.path import expanduser
 import math
 
 # download directory to the staging dir
-DJT_DOWNLOAD_DIR = expanduser("~") + "/Music/djtool/active"
+DJT_DOWNLOAD_BASE = expanduser("~") + "/Music/djtool"
+DJT_DOWNLOAD_DIR = DJT_DOWNLOAD_BASE + "/active"
+
 ZOOKEEPER_TIMEOUT_SECONDS = 5
         
 def HMS_from_seconds(seconds):

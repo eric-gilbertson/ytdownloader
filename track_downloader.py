@@ -55,7 +55,7 @@ class TrackDownloader():
         out_file = '"{}/{}_%(title)s.%(ext)s"'.format(self.download_dir, artistTerm)
         self.track_album = ''
         track_specifier_ar = re.split(ARTIST_TRACK_SEPARATOR, track_specifier)
-        error_msg = "Invalid song request. Use either a Youtube watch URL, e.g. youtube.com/watch?=<SOME_ID> or <ARTIST_NAME><SEPERATOR><SONG_TITLE> using -, ; or <TAB> as the artist/title separator"
+        error_msg = '''Invalid song request. Enter either <ARTIST_NAME><SEPERATOR><SONG_TITLE> using -, ; or <TAB> as the artist/title separator or a YouTube song URL. Note that the artist and song values do not have to be complete, e.g. "Stones ; Satisfaction"  and that one of the values may be empty, e.g. use "Beatles;" to locate Beatles songs or ";Hallelujah" to find cover versions of that song. All entry values correctly spelled.'''
         
         if not self.YTDL_PATH:
             tk.messagebox.showwarning(title="Error", message='The yt-dlp application was not found. Please install it as described in the help documentation and try again', parent=self.parent)
