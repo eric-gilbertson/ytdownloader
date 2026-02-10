@@ -8,8 +8,8 @@ from djutils import logit
 SPOTIFY_ID = ''
 SPOTIFY_SECRET = ''
 GENIUS_APIKEY = ''
-PLAYLIST_APIKEY = ''
-PLAYLIST_HOST = 'https://kzsu.stanford.edu'
+PLAYLIST_APIKEY = '8v3TC5vf8zVpwUuQ0K4uCz7kYBcTZj7i'
+PLAYLIST_HOST = 'http://localhost:5000'
 OUTPUT_DEVICE = ''
 
 class SystemConfig():

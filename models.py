@@ -169,11 +169,12 @@ class ZKPlaylist():
         end_time = time.time_ns()
 
     def send_track(self, track):
-        start_time = time.time_ns()
+        print(f"enter send_track {track.title}")
         if not self.id or not self._is_active() or track.is_pause_file() or track.title.startswith("LID_"):
             logit(f"skip send_track {self.id}, {self._is_active()}")
             return
 
+        print(f"do send_track {track.title}")
         url = SystemConfig.playlist_host + f'/djtool/addtrack/'
         apikey = SystemConfig.user_apikey
         event_type = 'break' if track.is_mic_break_file() else 'spin'

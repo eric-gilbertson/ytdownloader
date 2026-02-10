@@ -15,26 +15,32 @@ VLC like media player optimized for use in live radio features include:
 - Output device selection (first entry tries to be internal speakers)
 - Save/Load .m3u playlists (ignores non .wav/.mp3 lines)
 """
-import glob,  pathlib,  shutil,  time, os, pyaudio, json, re, datetime, yaml
-import math, os, shlex, socket, ssl, threading, traceback, urllib.request
+import glob
+import json
+import os
+import pathlib
 import platform
+import pyaudio
+import shlex
+import shutil
 import sys
-from urllib.parse import unquote
-from multiprocessing.process import parent_process
-from os.path import expanduser
-from pydub import AudioSegment
+import threading
+import time
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog, PhotoImage, scrolledtext
-from tkinterdnd2 import TkinterDnD, DND_FILES
+import traceback
 from tkinter import PhotoImage
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 
+from pydub import AudioSegment
+from tkinterdnd2 import TkinterDnD, DND_FILES
 from commondefs import *
-from  system_config import SystemConfig
-from fcc_checker import FCCChecker, get_album_label
 from djtool_dialogs import SelectAlbumDialog, LiveShowDialog, UserConfigurationDialog, TrackEditDialog
-from models import Track, ZKPlaylist, UserConfiguration
-from track_downloader import TrackDownloader, getTitlesYouTube
 from djutils import logit, get_logfile_path
+from fcc_checker import FCCChecker
+from models import Track, ZKPlaylist, UserConfiguration
+from system_config import SystemConfig
+from audio_player import PlayerThread
+from track_downloader import TrackDownloader, getTitlesYouTube
 
 
 def seconds_from_HMS(time_hms):
@@ -83,12 +89,11 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self.app_title = ''
 
         # ----- State -----
-        self._stop_playback = threading.Event()
-        self._paused = True
-        self._play_thread = None
-        self._track_id = None
+        #self._stop_playback = threading.Event()
+        #self._track_id = None
+        self._track_idx = -1
         self._audio_total_ms = 0
-        self._audio_pos_ms = 0
+        #self._audio_pos_ms = 0
         self.live_show = tk.BooleanVar()
         self.downloader = TrackDownloader(self, DJT_DOWNLOAD_DIR)
         UserConfiguration.load_config()
@@ -114,11 +119,12 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self._build_topbar(0)
         self._build_urlentry(1)
         self._build_treeview(2)
-        #self._build_countdown()
-
         self._bind_shortcuts()
         self._refresh_output_devices()
-        self._set_title()
+        self.set_title()
+
+        self.player = PlayerThread(self)
+        self.player.start() 
 
     def on_dock_reopen(self):
         """Called when Dock icon is clicked."""
@@ -145,14 +151,14 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if self.downloader.fetch_track(self, url_entry, use_fullname):
             self.url.config(cursor="clock")
             self.url.update()
-            self._fetch_track_done(1)
+            self._fetch_track_done()
         else:
             self.url.config(cursor="")
 
                 
-    def _fetch_track_done(self, dummy):
+    def _fetch_track_done(self):
         if not self.downloader.is_done:
-            self.after(500, self._fetch_track_done, 1)
+            self.after(500, self._fetch_track_done)
         else:
             if self.downloader.name_too_long:
                 self.bell()
@@ -160,7 +166,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                     self.downloader.is_done = False
                     self.downloader.name_too_long = False
                     self.downloader.fetch_track(self, 'dummy-url', False)
-                    self.after(500, self._fetch_track_done(1))
+                    self.after(500, self._fetch_track_done)
                 else:
                     return
             elif  self.downloader.download_file:
@@ -344,6 +350,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             out_idx = 0
             for i in range(pa.get_device_count()):
                 info = pa.get_device_info_by_index(i)
+                print(f"device: {info['name']}")
                 if info.get("maxOutputChannels", 0) > 0:
                     name = info.get("name")
                     name_lc = name.lower()
@@ -392,6 +399,15 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             selection_index = self.tree.index(selected_items[0])
     
         return selection_index
+
+    def get_selected_track(self):
+        track = None
+        selected_items = self.tree.selection()  # Get IDs of selected rows
+        if selected_items:
+            id = selected_items[0]
+            track = self.tree_datamap[id]
+
+        return track
 
     def insert_pause(self):
         insert_index = self._get_selected_index()
@@ -857,7 +873,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             logit(f"[Save] Error: {e}")
             traceback.print_exc()
 
-        self._set_title()
+        self.set_title()
 
     def show_log_window(self):
         if self.log_window and self.log_window.winfo_exists():
@@ -899,7 +915,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
         self.import_json(fp)
         self.playlist_file = fp
-        self._set_title()
+        self.set_title()
 
     def import_json(self, fp):
         total_secs = 0
@@ -936,18 +952,14 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
     # ======================= PLAYBACK =======================
     def _toggle_play_pause(self):
-        # If paused due to a pause-track, space resumes to next track.
-        if self._paused:
-            logit("play from pause")
-            self._paused = False
-            self._play_next_track()
-            return
-
-        # Otherwise: if playing -> stop (acts like pause); if stopped -> play selection
-        if self._play_thread and self._play_thread.is_alive() and not self._stop_playback.is_set():
-            self._stop_playback.set()
+        # iIf paused due to a pause-track, space resumes to next track.
+        print(f"enter toggle_play_pause")
+        if self.player.is_playing():
+            self.stop_audio()
         else:
-            self.play_selected()
+            logit("play from pause")
+            self._play_index(self._track_idx + 1)
+            return
 
     def live_show_change(self):
         if self.live_show.get():
@@ -1010,18 +1022,11 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         cur_time = time.time()
         time_delta = cur_time - self.last_doubleclick_time
         self.last_doubleclick_time = cur_time
+        # protect against false double click
         if time_delta < 10:
-            return
-
-        logit(f"enter on_double_click: {time_delta}")
-        self._stop_playback.set()
-        if self._play_thread and self._play_thread.is_alive():
-            logit("stop audio1")
-            self.stop_audio()
-            logit("stop audio2")
-
-        logit("play selected from double")
-        self.play_selected()
+            logit(f"enter on_double_click: {time_delta}")
+        else:
+            self.play_selected()
 
     def play_selected(self):
         idx = 0
@@ -1044,119 +1049,41 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             logit(f"Item not found: {id}")
             return
 
-        self._track_id = id
-        self._set_title(f"{index+1}: {track.artist} - {track.title}")
+        self.player.play_index(index)
 
-        if track.is_stop_file():
-            self._paused = True
-            self._set_countdown("")
-            if track.is_mic_break_file():
-                self.playlist.send_track(track)
+    def prepare_track_for_playback(self, idx):
+        logit(f"get_next_track")
+        items = self.tree.get_children("")
+            
+        track = None
+        if idx <  len(items):
+            next_row = items[idx]
+            self.tree.selection_set(next_row)
+            self.tree.focus(next_row)
+            self.tree.see(next_row)
+            track = self.tree_datamap.get(next_row, None)
+            title_msg = f"{idx+1}: {track.artist} - {track.title}"
+#            if track.is_stop_file():
+#                title_msg = f"{idx+1}: -- {track.title}"
 
-            return
+            self.set_title(title_msg)
+            self._track_idx = idx
+            spin_thread = threading.Thread(target=self.playlist.send_track, args=(track,))
+            spin_thread.start()
 
-        self._paused = False
+        return track
 
-        # Stop current playback if any
-        self.stop_audio()
-
-        try:
-            audio = AudioSegment.from_file(track.file_path)
-        except BaseException as ex:
-            logit(f"File not playable {track.file_path}, {ex}")
-            self._play_next_track()
-            return
-
-        self._audio_total_ms = len(audio)
-        self._audio_pos_ms = 0
-        self._stop_playback.clear()
-
-        # Start audio thread
-        self._play_thread = threading.Thread(target=self._stream_audio_thread, args=(audio,), daemon=True)
-        self._play_thread.start()
-
-        # Start countdown UI updates
-        self._start_countdown_updates()
-
-        self.playlist.send_track(track)
-
-    def _stream_audio_thread(self, audio_segment):
-        """Audio thread: writes chunks to PyAudio; updates _audio_pos_ms."""
-        pa = pyaudio.PyAudio()
-        try:
-            kwargs = dict(
-                format=pa.get_format_from_width(audio_segment.sample_width),
-                channels=audio_segment.channels, rate=audio_segment.frame_rate,
-                frames_per_buffer=4096, output=True,
-            )
-            if (dev_index := self._get_selected_device_index()) is not None:
-                kwargs["output_device_index"] = dev_index
-
-            stream = pa.open(**kwargs)
-
-            chunk_ms = 50  # smooth, low-latency
-            pos = 0
-            total = len(audio_segment)
-            logit(f"start play: {pos}, {total}, {self._stop_playback.is_set()}")
-            while pos < total and not self._stop_playback.is_set():
-                nxt = min(pos + chunk_ms, total)
-                chunk = audio_segment[pos:nxt]
-                stream.write(chunk.raw_data)
-                pos = nxt
-                self._audio_pos_ms = pos
-
-            logit(f"done playing")
-            stream.stop_stream()
-            stream.close()
-        except Exception as ex:
-            logit(f"Playback error: {ex}")
-        finally:
-            try:
-                pa.terminate()
-            except Exception:
-                pass
-
-            # Natural end -> play next (unless stopped)
-            self._set_title("")
-            if not self._stop_playback.is_set():
-                logit("done, play next track")
-                self.after(120, self._play_next_track)
-            else:
-                logit("halt playback")
-                self._audio_pos_ms = 0
-                self.after(0, lambda: self._set_countdown(""))
 
     def stop_audio(self):
         logit(f"stop_audio: enter")
-        if self._play_thread and self._play_thread.is_alive():
-            logit(f"stop_audio: stop_playback")
-            self._stop_playback.set()
-            self._play_thread.join(timeout=2.0)
-            logit(f"stop_audio: stop_playback")
-
-        self._play_thread = None
-        #self._stop_playback.clear()
-        self._audio_pos_ms = 0
-        self._set_countdown("")
-
-    def _play_next_track(self):
-        logit(f"enter play_next_track")
-        items = self.tree.get_children("")
-
-        idx = items.index(self._track_id)
-        if idx < len(items) - 1:
-            next_item = items[idx + 1]
-            self.tree.selection_set(next_item)
-            self.tree.focus(next_item)
-            self.tree.see(next_item)
-            self._play_index(idx + 1)
+        self.player.stop_player()
 
     def _set_dirty(self, is_dirty):
         self.is_dirty = is_dirty
-        if not self._play_thread or not self._play_thread.is_alive():
-            self._set_title()
+        if self.player.state != PlayerState.PLAYING:
+            self.set_title()
 
-    def _set_title(self, title_str=''):
+    def set_title(self, title_str=''):
         self.app_title = self.DEFAULT_TITLE
         if len(title_str) > 0:
             self.app_title = title_str
@@ -1167,29 +1094,8 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self.title(self.app_title)
 
     # ----- Countdown updates -----
-    def _set_countdown(self, time_str):
+    def set_countdown(self, time_str):
         self.title(f"{self.app_title} {time_str}")
-
-    def  _start_countdown_updates(self):
-        self._update_countdown()
-
-    def _update_countdown(self):
-        if self._audio_total_ms:
-            remaining = max(self._audio_total_ms - self._audio_pos_ms, 0)
-            m = int(remaining // 60000)
-            s = int((remaining % 60000) // 1000)
-            if m == 0 and s == 0:
-                self._set_countdown("")
-            else:
-                self._set_countdown(f"{m:02}:{s:02}")
-        else:
-            self._set_countdown("")
-
-        if self._play_thread and self._play_thread.is_alive() and not self._stop_playback.is_set():
-            self.after(200, self._update_countdown)
-        else:
-            if self._stop_playback.is_set():
-                self._set_countdown("")
 
 
 if __name__ == "__main__":
