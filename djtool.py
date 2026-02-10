@@ -15,19 +15,9 @@ VLC like media player optimized for use in live radio features include:
 - Output device selection (first entry tries to be internal speakers)
 - Save/Load .m3u playlists (ignores non .wav/.mp3 lines)
 """
-import glob
-import json
-import os
-import pathlib
-import platform
-import pyaudio
-import shlex
-import shutil
-import sys
-import threading
-import time
-import tkinter as tk
-import traceback
+import glob,  json,  os,  pathlib,  platform,  pyaudio,  shlex, webbrowser
+import shutil,  sys,  threading,  time,  traceback
+import tkinter as tk,  traceback
 from tkinter import PhotoImage
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
@@ -226,7 +216,8 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         menubar.add_cascade(label="Edit", menu=editmenu)
 
         viewmenu = tk.Menu(menubar, tearoff=0)
-        viewmenu.add_command(label="Log File", command=self.show_log_window)
+        viewmenu.add_command(label="Log", command=self.show_log_window)
+        viewmenu.add_command(label="Help", command=self.show_help_window)
         menubar.add_cascade(label="View", menu=viewmenu)
 
         self.config(menu=menubar)
@@ -353,7 +344,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
                 print(f"device: {info['name']}")
                 if info.get("maxOutputChannels", 0) > 0:
                     name = info.get("name")
-                    name_lc = name.lower()
+                    name_lc = name.lower().strip()
                     if name_lc == default_output_lc:
                         default_idx = out_idx
                     elif ("internal" in name_lc) or ("built-in" in name_lc) or ("builtin" in name_lc):
@@ -874,6 +865,10 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             traceback.print_exc()
 
         self.set_title()
+
+    def show_help_window(self):
+        full_path = f'file://{os.getcwd()}/djtool.html'
+        webbrowser.open(full_path)
 
     def show_log_window(self):
         if self.log_window and self.log_window.winfo_exists():
