@@ -10,7 +10,7 @@ class PlayerState(Enum):
 
 class UpdaterThread(threading.Thread):
     def __init__(self, root):
-        super(UpdaterThread, self).__init__()
+        super(UpdaterThread, self).__init__(daemon=True)
         self.root = root
         self.remaining = 0
         self.stop_event = threading.Event()
@@ -37,7 +37,7 @@ class UpdaterThread(threading.Thread):
             
 class PlayerThread(threading.Thread):
     def __init__(self, parent):
-        super(PlayerThread, self).__init__()
+        super(PlayerThread, self).__init__(daemon=True)
         self.parent = parent
         self.track_index = -1
         self.state = PlayerState.STOPPED

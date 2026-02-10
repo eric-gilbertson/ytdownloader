@@ -1080,7 +1080,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
     def _set_dirty(self, is_dirty):
         self.is_dirty = is_dirty
-        if self.player.state != PlayerState.PLAYING:
+        if not self.player.is_playing():
             self.set_title()
 
     def set_title(self, title_str=''):
