@@ -21,6 +21,7 @@ import tkinter as tk,  traceback
 from tkinter import PhotoImage
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
+from CTkMessagebox import CTkMessagebox
 from pydub import AudioSegment
 from tkinterdnd2 import TkinterDnD, DND_FILES
 from commondefs import *
@@ -713,13 +714,21 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             logit("[Save] No files to save.")
             return
 
+        msg = '''Would you like to export all songs or only those with an unknown FCC status?'''
+        dialog = CTkMessagebox(title="MP3 Save", message=msg, icon="question", option_1="All Songs", option_2="Unknown FCC Songs Only")
+        answer = dialog.get()
+        all_tracks = answer == 'All Songs'
+        
         seconds = 0
+        track_cnt = 0
         for item in self.tree.get_children(""):
             track = self.tree_datamap[item]
-            seconds = seconds + track.duration
+            if all_tracks or track.fcc_status == 'NOT_FOUND':
+                seconds = seconds + track.duration
+                track_cnt = track_cnt + 1
 
-        minutes = (seconds / 3600) * 10  #rough conversion is 10 minutes per hour
-        msg = f'This operation will take approximately {int(minutes)} minutes. Do you with to continue?'
+        minutes = (seconds / 3600) * 5  #rough conversion is 5 minutes per hour
+        msg = f'Exporting the {track_cnt} selected songs will take approximately {int(minutes)} minutes. Do you with to continue?'
         doit = tk.messagebox.askokcancel(title="Start MP3 Save?", message=msg, parent= self)
         if not doit:
             return
@@ -739,6 +748,9 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         duration = 0
         for item in self.tree.get_children(""):
             track = self.tree_datamap[item]
+            if not all_tracks and track.fcc_status != 'NOT_FOUND':
+                continue
+
             duration = duration + track.duration
 
             audio = None

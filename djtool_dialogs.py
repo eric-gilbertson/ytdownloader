@@ -79,6 +79,24 @@ class SelectAlbumDialog(simpledialog.Dialog):
         self.destroy()
         
 
+#def custom_dialog():
+#    # Create a Toplevel window (acts as the dialog)
+#    win = tk.Toplevel(root)
+#    win.title("Custom Dialog")
+#
+#    # Add a message label
+#    message = "Do you want to proceed or stop?"
+#    tk.Label(win, text=message).pack(pady=20)
+#
+#    # Add custom buttons
+#    # The 'command' ties the button action to a function
+#    tk.Button(win, text='Proceed', command=lambda: handle_choice(win, "proceed")).pack(side=tk.LEFT, padx=10, pady=10)
+#    tk.Button(win, text='Stop', command=lambda: handle_choice(win, "stop")).pack(side=tk.RIGHT, padx=10, pady=10)
+#
+#def handle_choice(window, choice):
+#    print(f"User chose: {choice}")
+#    window.destroy() # Close the custom dialog after the choice is made
+
 class LiveShowDialog(simpledialog.Dialog):
     def __init__(self, parent, show_title, show_start):
         self.parent = parent
@@ -177,12 +195,12 @@ class TrackEditDialog(simpledialog.Dialog):
     def __init__(self, parent, track):
         self.parent = parent
         self.ok_clicked = False
-        self.track_artist = track.artist
-        self.track_title  = track.title
-        self.track_album = track.album
-        self.track_label = track.label
+        self.track_artist = track.artist if track.artist else ''
+        self.track_title  = track.title if track.title else ''
+        self.track_album = track.album if track.album else ''
+        self.track_label = track.label if track.label else ''
         self.track_fcc_status = track.fcc_status
-        self.track_fcc_comment = track.fcc_comment
+        self.track_fcc_comment = track.fcc_comment if track.fcc_comment else ''
         super().__init__(parent, "Edit Track")
 
 

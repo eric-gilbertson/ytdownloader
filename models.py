@@ -30,7 +30,7 @@ class Track():
         self.title = title if title else '-'
         self.artist = artist if artist else '-'
         self.album = album if album else '-'
-        self.label = label
+        self.label = label if label else '-'
         self.file_path = file_path
         self.duration = duration # seconds
         self.fcc_status = fcc_status if fcc_status else ''
