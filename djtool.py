@@ -80,11 +80,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         self.app_title = ''
 
         # ----- State -----
-        #self._stop_playback = threading.Event()
-        #self._track_id = None
-        self._track_idx = -1
-        self._audio_total_ms = 0
-        #self._audio_pos_ms = 0
+        self._track_id = ''
         self.live_show = tk.BooleanVar()
         self.downloader = TrackDownloader(self, DJT_DOWNLOAD_DIR)
         UserConfiguration.load_config()
@@ -204,6 +200,7 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         filemenu.add_command(label="Load Playlist...", command=self.load_playlist)
         filemenu.add_command(label="Save Playlist...", command=self.save_playlist)
         filemenu.add_command(label="Update Playlist", accelerator = '⌘-s', command=self.update_playlist)
+        filemenu.add_command(label="ClearPlaylist...", command=self.clear_playlist)
         filemenu.add_command(label="Import Audio...", command=self.import_audio_files)
         filemenu.add_command(label="Save MP3...", command=self.save_mp3)
         menubar.add_cascade(label="File", menu=filemenu)
@@ -342,7 +339,6 @@ class AudioPlaylistApp(TkinterDnD.Tk):
             out_idx = 0
             for i in range(pa.get_device_count()):
                 info = pa.get_device_info_by_index(i)
-                print(f"device: {info['name']}")
                 if info.get("maxOutputChannels", 0) > 0:
                     name = info.get("name")
                     name_lc = name.lower().strip()
@@ -816,6 +812,23 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         else:
             self.save_playlist()
 
+    def clear_playlist(self):
+        msg = "Do you want to delete the audio files associated with this playlist?"
+        response = messagebox.askyesnocancel("Confirm Request", msg, parent=self)
+        self.tree.focus_set()      # Explicitly set focus back to the main window
+
+        if response is None:
+            return
+        else:
+            for item_id in self.tree.get_children():
+                self.tree.delete(item_id)
+                track = self.tree_datamap.pop(item_id, None)
+                if response and os.path.exists(track.file_path) and track.is_downloaded_file():
+                    os.remove(track.file_path)
+  
+            self.playlist_file = ''
+            self._set_dirty(False)
+
     def save_playlist(self):
         fp = filedialog.asksaveasfilename(
                 defaultextension=".json",
@@ -960,12 +973,13 @@ class AudioPlaylistApp(TkinterDnD.Tk):
     # ======================= PLAYBACK =======================
     def _toggle_play_pause(self):
         # iIf paused due to a pause-track, space resumes to next track.
-        print(f"enter toggle_play_pause")
+        logit(f"enter toggle_play_pause")
         if self.player.is_playing():
             self.stop_audio()
         else:
             logit("play from pause")
-            self._play_index(self._track_idx + 1)
+            next_track = self.get_next_track_for_playback(self._track_id)
+            self._play_track_from_id(next_track.id)
             return
 
     def live_show_change(self):
@@ -1026,22 +1040,22 @@ class AudioPlaylistApp(TkinterDnD.Tk):
 
 
     def on_double_click(self):
+        logit("enter double click")
         cur_time = time.time()
         time_delta = cur_time - self.last_doubleclick_time
         self.last_doubleclick_time = cur_time
         # protect against false double click
         if time_delta < 10:
-            logit(f"enter on_double_click: {time_delta}")
+            logit(f"ignore double_click: {time_delta}")
         else:
             self.play_selected()
 
     def play_selected(self):
-        idx = 0
-        if sel := self.tree.selection():
-            idx = self.tree.index(sel[0])
-
-        logit(f"play selected: {idx}")
-        self._play_index(idx)
+        selected = self.tree.selection()
+        if len(selected) > 0:
+            rowid = selected[0]
+            logit(f"play selected: {rowid}")
+            self._play_track_from_id(rowid)
 
     def _play_index(self, index: int):
         logit(f'enter _play_index {index}')
@@ -1049,37 +1063,39 @@ class AudioPlaylistApp(TkinterDnD.Tk):
         if index < 0 or index >= len(items):
             return
 
-        id = items[index]
-        track = self.tree_datamap.get(id, None)
-        logit(f'enter _play_index {index}, {track.title}')
-        if not track:
-            logit(f"Item not found: {id}")
-            return
+        rowid = items[index]
+        self._play_track_from_id(self, rowid)
 
-        self.player.play_index(index)
+    def _play_track_from_id(self, trackid):
+        track = self.tree_datamap[trackid]
+        if track:
+            logit(f'enter _play_index {trackid}, {track.title}')
+            self.player.start_player(track)
+        else:
+            logit(f"Item not found: {trackid}")
 
-    def prepare_track_for_playback(self, idx):
-        logit(f"get_next_track")
-        items = self.tree.get_children("")
-            
-        track = None
-        if idx <  len(items):
-            next_row = items[idx]
-            self.tree.selection_set(next_row)
-            self.tree.focus(next_row)
-            self.tree.see(next_row)
-            track = self.tree_datamap.get(next_row, None)
-            title_msg = f"{idx+1}: {track.artist} - {track.title}"
-#            if track.is_stop_file():
-#                title_msg = f"{idx+1}: -- {track.title}"
 
-            self.set_title(title_msg)
-            self._track_idx = idx
-            spin_thread = threading.Thread(target=self.playlist.send_track, args=(track,))
-            spin_thread.start()
+    def prepare_track_for_playback(self, track):
+        logit(f"prepare_track {track.title}")
+        self.tree.selection_set(track.id)
+        self.tree.focus(track.id)
+        self.tree.see(track.id)
+        idx = self.tree.index(track.id)
+        title_msg = f"{idx+1}: {track.artist} - {track.title}"
+        self.set_title(title_msg)
+        self._track_id = track.id
+        spin_thread = threading.Thread(target=self.playlist.send_track, args=(track,))
+        spin_thread.start()
 
-        return track
+    def get_next_track_for_playback(self, cur_track_id):
+        next_track = None
+        cur_idx = self.tree.index(cur_track_id)
+        rows = self.tree.get_children()
+        if 0 <= cur_idx < len(rows) - 1:
+            next_id = rows[cur_idx+1]
+            next_track = self.tree_datamap[next_id]
 
+        return next_track
 
     def stop_audio(self):
         logit(f"stop_audio: enter")

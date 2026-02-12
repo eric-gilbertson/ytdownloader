@@ -39,7 +39,7 @@ class PlayerThread(threading.Thread):
     def __init__(self, parent):
         super(PlayerThread, self).__init__(daemon=True)
         self.parent = parent
-        self.track_index = -1
+        self.track = None
         self.state = PlayerState.STOPPED
         self.start_playback = threading.Event()
         self.py_audio = pyaudio.PyAudio()
@@ -55,12 +55,13 @@ class PlayerThread(threading.Thread):
     def stop_player(self):
         self.state = PlayerState.STOPPED
 
-    def play_index(self, index):
+    def start_player(self, track):
+        logit(f"start_player {track.title}")
         if self.state == PlayerState.PLAYING:
             self.state = PlayerState.STOPPED
             time.sleep(1)
             
-        self.track_index = index
+        self.track = track
         self.start_playback.set()
 
 
@@ -73,13 +74,13 @@ class PlayerThread(threading.Thread):
         self.start_playback.clear()
         self.state = PlayerState.PLAYING
 
-        while self.is_playing() and (track := self.parent.prepare_track_for_playback(self.track_index)) is not None:
+        while self.is_playing() and self.track:
             try:
-                self.track_index = self.track_index + 1
-                if track.is_stop_file():
+                self.parent.prepare_track_for_playback(self.track)
+                if self.track.is_stop_file():
                     break
 
-                audio_segment = AudioSegment.from_file(track.file_path)
+                audio_segment = AudioSegment.from_file(self.track.file_path)
                 kwargs = dict(
                     format=self.py_audio.get_format_from_width(audio_segment.sample_width),
                     channels=audio_segment.channels, rate=audio_segment.frame_rate,
@@ -107,6 +108,9 @@ class PlayerThread(threading.Thread):
             except Exception as ex:
                 logit(f"Playback error: {ex}")
 
+            if self.is_playing():
+                self.track = self.parent.get_next_track_for_playback(self.track.id)
+        
         self.state = PlayerState.STOPPED
 
 
