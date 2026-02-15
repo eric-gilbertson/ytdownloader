@@ -6,6 +6,7 @@ from tkinter import simpledialog
 import tkinter as tk
 from tkinter import messagebox
 from ytmusicapi import YTMusic
+from fuzzy_search import FuzzyYTMusic
 
 
 from audio_trimmer import trim_audio
@@ -42,6 +43,8 @@ class TrackDownloader():
         self.download_file = None
         self.track_album = ''
         self.is_done = False
+        self.fuzzy_search = FuzzyYTMusic()
+
 
         if not os.path.exists(download_dir):
             os.makedirs(download_dir)
@@ -70,8 +73,8 @@ class TrackDownloader():
         if not is_url and use_fullname  and len(track_specifier_ar) == 2:
             artist = track_specifier_ar[0]
             title = track_specifier_ar[1]
-            tracks = getTracksYouTube(artist, title)
-            if len(tracks) == 0:
+            tracks = self.fuzzy_search.search_song(artist, title)
+            if not tracks or len(tracks) == 0:
                 msg = f"Nothing found for -{title}- by -{artist}-. Note that the format for song lookup is <ARTIST>;<TITLE>. The names do not have to be complete but they must be spelled correctly."
                 tk.messagebox.showwarning(title="Error", message=msg)
                 return False
@@ -362,41 +365,3 @@ def getTitlesYouTube(artist, track):
 
     return choices
 
-def getTracksYouTube(artist, track):
-    yt = YTMusic()
-
-    if track.endswith(".mp3") or track.endswith(".wav"):
-        track = track[0:-4]
-
-    track = track.strip()
-    artist = artist.strip()
-    search_key = '"' + artist + '" "' + track + '"'
-
-    # search types: songs, videos, albums, artists, playlists, community_playlists, featured_playlists, uploads
-    search_results = yt.search(search_key, 'songs')
-    #print("YouTube search for -{}- found {} items".format(search_key, len(search_results)))
-
-    choices =[]
-    releases = []
-    artist_lc = artist.lower()
-    releaseTitle = None
-    singleTitle = None
-    for item in search_results:
-        artists = ''
-        for artist_row in item.get('artists', []):
-            artists = artist_row['name'] + ', '
-
-        #print("item: {}, {}".format(artists, item['title']))
-
-        if artists.lower().find(artist_lc) >= 0:
-            releaseTitle = item['title']
-            #key = '{} -\t {}'.format(artists, releaseTitle)
-            if releaseTitle not in releases and 'videoId' in item:
-                choices.append(item)
-                releases.append(releaseTitle)
-
-    return choices
-
-#downloader = TrackDownloader("/tmp")
-#downloader.fetch_track("https://www.youtube.com/watch?v=20cuFhgPLEo", True)
-#downloader.fetch_track("https://www.youtube.com/watch?v=vhgxiu8TaXk", True)

@@ -1,25 +1,26 @@
 <h1><center>DJ Tool</center></h1>
 
-DJ Tool is a song download and playlist management tool that is optimized for the the production of both live and pre-recorded radio programs. It's iTunes/VLC like interface  provides the following features:
+DJ Tool is a music download and playlist management tool that is optimized for the the production of both live and pre-recorded radio programs. It's iTunes/VLC like interface  provides the following features:
 
 <ul>
-<li> Song lookup by artist and song title</li>
-<li> Fast download of tracks from YouTube in broadcast ready format</li>
-<li> Zookeeper playlist generation </li>
+<li> Song lookup by artist and song title using fuzzy search</li>
+<li> Fast download of tracks from in broadcast ready format</li>
 <li> Automatic start/stop for mic breaks and pauses</li>
-<li> Interface to USB Codecs</li>
 <li> Drag and drop track reordering</li>
 <li> Show export as an MP3 file</li>
-<li> Posts tracks to Zookeeper as they are played (live shows)</li>
-<li> Exports Zookeeper playlist file for upload (prerecorded shows)</li>
+<li> Automatic spin submission to playlist (live shows)</li>
 <li> Convenient track editing</li>
 <li> Accept file drops from external sources</li>
 <li> Song check for explicit lyrics</li>
 <li> Album and label lookup</li>
+<li> Interface to USB Codecs</li>
+<li> Zookeeper playlist generation </li>
 </ul>
 
 
 <h2>Live Show Quickstart</h2>
+The following steps describe how to use DJTool for live shows. Note that songs can be downloaded while the show is in progress.
+
 <li>Use Zookeeper to create an empty playlist for your show</li>
 <li>Start app using Mac's Spotlight launcher, e.g.Cmd-<space> and enter DJTool</li>
 <li>Click Live Show box and enter show name and click OK</li>
@@ -35,7 +36,7 @@ DJ Tool is a song download and playlist management tool that is optimized for th
 <li>Upon show completion exit app and confirm playlist deletion</li>
 
 <h3> Quickstart Hints</h3>
-<li>If track search fails, use direct entry of the YouTube video URL</li>
+<li>If song search fails, use direct entry of the YouTube video URL</li>
 <li>Entering <Space> toggles between play and stop modes</li>
 <li>Songs can be downloaded during playback</li>
 <li>Fast switch to another track by double clicking it</li>
@@ -52,7 +53,7 @@ Songs can be added to the playlist through the following actions:
 <li> Dragging a local audio file into DJTool</li>
 </ul>
 
-Songs are downloaded from YouTube by entering the URL of a video page or <ARTIST_NAME> ; <SONG_TITLE> into the URL input field and clicking Fetch or entering '<CR>'.  After 10s delay, a  broadcast ready (no ads and leading/trailing silence trimmed to 2 seconds) copy of the track will be added to your local drive as a wav file and appended to the playlist. Note that it is not necessary to enter full artist and title names. Entering enough to identify the song is sufficient, e.g "cliff; harder" would download Jimmy Cliff's great song.  If the song search returns multiple results, then a song a choice picker will be presented.  Note that you must install the yt-dlp open source application in order to use this feature, as described in the setup section. In order to accommodate copy/pasting of artist/sing from outside playlists, the URL input field also accepts tab and - as field  separaters.
+Songs are downloaded from YouTube by entering the URL of a video page or by entering the song info as <ARTIST_NAME> ; <SONG_TITLE> into the URL input field and clicking Fetch or entering '<CR>'. After 10s delay, a  broadcast ready (no ads and leading/trailing silence trimmed to 2 seconds) copy of the track will be added to your local drive as a wav file and appended to the playlist. Note that it is not necessary to enter full artist and title names. Entering enough to identify the song is sufficient, e.g "cliff; harder" would download Jimmy Cliff's great song.  If the song search returns multiple results, then a song a choice picker will be presented.  Note that you must install the yt-dlp open source application in order to use this feature, as described in the setup section. In order to accommodate copy/pasting of artist/sing from outside playlists, the URL input field also accepts tab and - as field  separaters.
 
 The album will be added to the playlist when downloading with the artist/title input format but not for downloads using the video URL. For the latter, the album titles can be found with the Find Albums feature.
 

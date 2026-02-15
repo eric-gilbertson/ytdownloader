@@ -1,14 +1,26 @@
 audioop-lts; python_version >= '3.13'
+altgraph
+audioop-lts
 beautifulsoup4
 certifi
 charset-normalizer
+CTkMessagebox
+customtkinter
+darkdetect
 idna
 lyricsgenius
+macholib
+packaging
+pillow
 PyAudio
 pydub
+pyinstaller
+pyinstaller-hooks-contrib
 PyYAML
+RapidFuzz
 redis
 requests
+setuptools
 soupsieve
 spotipy
 tkinterdnd2
